@@ -11,8 +11,9 @@ Press two keys, talk, press them again — the words land in whatever field your
 
 *Sotto voce* is Italian for "in a low voice". You mutter under your breath;
 Sotto writes it down. No account, no upload, no word limit, nothing to
-subscribe to. Wayland and X11. English, Urdu, and 90 more languages. Runs on
-the CPU.
+subscribe to. Wayland and X11. English, Urdu, and 90 more languages — non-Latin
+scripts (Urdu, Arabic, Hindi) need Wayland, because they go through the
+clipboard. Runs on the CPU.
 
 ## Why it exists
 
