@@ -40,7 +40,7 @@ def load_model():
     t0 = time.time()
     # 4 threads match the physical cores; 8 (SMT) measured no faster and
     # contends with whatever else is running.
-    model = WhisperModel(os.environ.get("WHISPERQUILL_MODEL", "small"), device="cpu", compute_type="int8", cpu_threads=4)
+    model = WhisperModel(os.environ.get("SOTTO_MODEL", "small"), device="cpu", compute_type="int8", cpu_threads=4)
     print(f"model ready in {time.time() - t0:.1f}s", flush=True)
 
 

@@ -68,7 +68,7 @@ def transcribe_local(path: str) -> dict:
     from faster_whisper import WhisperModel
 
     try:
-        model = WhisperModel(os.environ.get("WHISPERQUILL_MODEL", "small"), device="cpu", compute_type="int8", cpu_threads=8)
+        model = WhisperModel(os.environ.get("SOTTO_MODEL", "small"), device="cpu", compute_type="int8", cpu_threads=8)
     except Exception as e:  # noqa: BLE001
         die(f"could not load whisper model: {e}")
     audio = load_audio(path)

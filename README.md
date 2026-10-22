@@ -1,82 +1,85 @@
-# WhisperQuill — Whisper for Linux that types where you look
+<p align="center">
+  <img src="assets/icon-256.png" width="120" alt="Sotto">
+</p>
 
-Offline voice typing for Linux. Press two keys, talk, press them again — the
-words appear in whatever field your cursor is in. No account. No upload. No
-word limit. Works on Wayland and X11 desktops, English, Urdu, and any other
-language Whisper knows.
+<h1 align="center">Sotto</h1>
 
-> Whisper made speaking into text easy. It just never typed it for you on
-> Linux. This is the missing half.
+<p align="center"><b>Offline voice typing for Linux.</b><br>
+Press two keys, talk, press them again — the words land in whatever field your cursor is in.</p>
 
-## The problem it solves
+---
 
-You can already transcribe audio with Whisper. What you cannot do, out of the
-box, is get that text into the app you are typing in — a browser, an editor, a
-chat box, a terminal. WhisperQuill is that bridge: it records, transcribes
-locally, and injects the text as if you had typed it, while you are still
-speaking.
+*Sotto voce* is Italian for "in a low voice". You mutter under your breath;
+Sotto writes it down. No account, no upload, no word limit, nothing to
+subscribe to. Wayland and X11. English, Urdu, and 90 more languages. Runs on
+the CPU.
 
-## What it feels like
+## Why it exists
 
-1. Put the cursor where the text should go.
-2. Press `Ctrl+Alt+Space`. A beep. "Listening…".
-3. Talk. Words start appearing after about four seconds, and keep coming.
-4. Press `Ctrl+Alt+Space` again. Second beep. The rest lands.
+Typing is slower than talking. Whisper already turns speech into text — it
+just never got that text into the app you were typing in, on Linux, without a
+subscription.
 
-It streams: each ~4 second slice is transcribed and typed while the next slice
-is still being recorded. You are not waiting for the whole take.
+Sotto is that last step. It records, transcribes locally, and types the result
+wherever your cursor is, while you are still speaking.
 
 ## Install
 
-Requires Arch/CachyOS-style packages, but the parts are standard.
+One command in a terminal:
 
 ```bash
-git clone https://github.com/sahil2837j-eng/whisperquill.git
-cd whisperquill
-./install.sh
+git clone https://github.com/sahil2837j-eng/sotto.git
+cd sotto
+./setup
 ```
 
-`install.sh` creates a Python venv, installs `faster-whisper`, copies the
-scripts to `~/.local/share/whisperquill`, and registers the global shortcut.
+The installer walks six steps and asks before each change:
 
-### The one part that needs root
+1. checks the tools it needs, offers to install the missing ones
+2. copies itself to `~/.local/share/sotto`
+3. builds a small Python environment with `faster-whisper`
+4. loads the `uinput` kernel module and starts the typing daemon
+5. writes the application entry that carries the shortcut
+6. checks every piece and tells you what (if anything) is still wrong
 
-Linux does not let a normal program type into other windows. That job belongs
-to a kernel device, `/dev/uinput`, served by `ydotoold`. Three things must be
-true:
+The two root-level things are unavoidable, because Linux does not let a normal
+program type into other windows:
 
 ```bash
-# 1. the kernel module must be loaded (and stay loaded)
+# loaded now, and at every boot
 sudo modprobe uinput
 echo uinput | sudo tee /etc/modules-load.d/uinput.conf
 
-# 2. a daemon must hold /dev/uinput open
-sudo install -m 644 packaging/ydotoold@.service /etc/systemd/system/
+# a daemon holding /dev/uinput open, giving you a private socket
+sudo install -m 644 packaging/ydotoold@.service /etc/systemd/system/ydotoold@.service
 sudo systemctl enable --now ydotoold@$(id -u)
 ```
 
 `/dev/uinput` is `root:input 0660`. Either add yourself to the `input` group
-and re-login, or let `packaging/ydotoold@.service` run the daemon as root and
-hand you a private socket — it uses `--socket-own=1000:1000`, so `ydotool`
-works without any group change or logout.
+and log out, or let the unit above run the daemon as root and hand you a socket
+you own — no group change, no logout.
 
-Check it:
+Uninstall with `./setup --uninstall`. Your recordings are left alone.
 
-```bash
-systemctl is-active ydotoold@$(id -u)   # active
-ls -l /run/user/1000/.ydotool_socket
-ydotool type --file /dev/null && echo ok
-```
+## Use
+
+1. Put the cursor where the text should go.
+2. Press `Ctrl+Alt+Space`. A beep. "Listening…".
+3. Talk. Words start appearing after about four seconds.
+4. Press `Ctrl+Alt+Space` again. Second beep. The rest lands.
+
+It streams: each ~4 second slice is transcribed and typed while the next one
+is still being recorded. You are not waiting for the whole take.
 
 ## Languages
 
-Nothing is pinned by default: Whisper detects the language per take, so you can
-switch between English and Urdu mid-sentence and it keeps up.
+Nothing is pinned by default — Whisper detects the language per take, so you
+can switch between English and Urdu mid-sentence and it keeps up.
 
-To pin one language:
+To pin one:
 
 ```bash
-export WHISPERQUILL_LANGUAGE=ur    # or en, hi, ar, es, ... 90+ languages
+export SOTTO_LANGUAGE=ur    # en, hi, ar, es, tr, ... 90+
 ```
 
 Latin text is typed key by key. Anything non-ASCII (Urdu, Arabic, Hindi) goes
@@ -86,18 +89,41 @@ send physical keycodes. That replaces your clipboard for that utterance.
 ## Choose the model
 
 ```bash
-export WHISPERQUILL_MODEL=base     # faster, less accurate
-export WHISPERQUILL_MODEL=medium   # slower, better Urdu (~1.5 GB download)
+export SOTTO_MODEL=base     # faster, less accurate
+export SOTTO_MODEL=medium   # slower, better Urdu (~1.5 GB download)
 ```
 
 Default is `small`: the best balance on a CPU-only machine.
 
 ## Speed, honestly
 
-On a 4-core i5-8350U: a 10 second sentence takes about 15 seconds to appear,
-a 30 second one about 45. The streaming design hides most of that — you see
-text while you keep talking. First use after five idle minutes pays a ~7 second
+On a 4-core i5-8350U: a 10 second sentence takes about 15 seconds to appear, a
+30 second one about 45. The streaming design hides most of that — you see text
+while you keep talking. The first use after five idle minutes pays a ~7 second
 model load.
+
+## Troubleshooting
+
+**It listens and notifies, but nothing is typed.** This is almost always
+`uinput`. Look for `failed to open uinput device` in the log.
+
+```bash
+ls /dev/uinput                       # must exist
+lsmod | grep uinput                  # must be listed
+systemctl is-active ydotoold@$(id -u)   # must say active
+journalctl -u ydotoold@$(id -u) -n 20   # explains why it is not
+```
+
+Fix the three root steps above. Nothing else in the app can cause "no text".
+
+**It types into the wrong place.** Text goes wherever focus is at the moment
+of typing. Wait for the beep before clicking away.
+
+**Urdu comes out as broken English.** Pin the language with
+`SOTTO_LANGUAGE=ur`, or move from `base` to `small` or `medium`.
+
+**The shortcut does nothing.** Log out and back in once so KDE picks up the new
+entry, or bind it by hand in System Settings → Keyboard → Shortcuts.
 
 ## Files
 
@@ -108,40 +134,21 @@ model load.
 | `model_server.py` | keeps the model resident, exits after 5 min idle to free RAM |
 | `transcribe.py` | one-shot path, also the fallback when streaming fails |
 | `vdlib.py` | shared helpers: server socket, text insertion, history |
+| `setup` | the installer above |
 | `packaging/` | systemd unit and desktop entry templates |
-| `sounds/` | start/stop beeps |
+| `assets/` | icon |
+| `sounds/` | start and stop beeps |
 
 Every take gets its own wav under `state/takes/`, so starting a new one can
-never overwrite the previous recording.
-
-## Troubleshooting
-
-**It listens and notifies, but nothing is typed.** This is almost always
-`uinput`. The log says `failed to open uinput device` or `ydotool type:`
-with an empty message.
-
-```bash
-ls /dev/uinput                       # must exist
-lsmod | grep uinput                  # must be listed
-systemctl is-active ydotoold@$(id -u)  # must be active
-journalctl -u ydotoold -n 20         # explains why it is not
-```
-
-Fix the three root steps above. Nothing else in the app can cause "no text".
-
-**It types into the wrong place.** The text goes wherever focus is at the
-moment of typing. Wait for the beep before clicking away.
-
-**Urdu comes out as broken English.** Pin the language with
-`WHISPERQUILL_LANGUAGE=ur`, or move from `base` to `small`/`medium`.
+never overwrite the previous recording. `history.log` keeps what you dictated;
+delete it whenever you like.
 
 ## Not affiliated
 
 Uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and OpenAI's
 Whisper models, [ydotool](https://github.com/ReimuNotMoe/ydotool), and
-[wl-clipboard](https://github.com/bugaevc/wl-clipboard). WhisperQuill is not
-affiliated with OpenAI or Microsoft. "Whisper" here names the model family the
-tool runs on.
+[wl-clipboard](https://github.com/bugaevc/wl-clipboard). Sotto is not
+affiliated with OpenAI, Microsoft, or KDE.
 
 ## License
 

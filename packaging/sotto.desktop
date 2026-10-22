@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=WhisperQuill
+Name=Sotto
 GenericName=Voice Dictation
 Comment=Press once to listen, again to stop — text appears where the cursor is
 Exec=__EXEC__
-Icon=audio-input-microphone
+Icon=__ICON__
 Terminal=false
 StartupNotify=false
 NoDisplay=true

@@ -1,4 +1,4 @@
-"""Shared helpers for the whisperquill scripts (transcribe.py, streamer.py).
+"""Shared helpers for the sotto scripts (transcribe.py, streamer.py).
 
 Keeps the model-server client, the text-insertion logic and the history log
 in one place so the live and the one-shot paths cannot drift apart.
@@ -55,8 +55,8 @@ def ask_server(path, *, language=None, prompt=None, beam_size=None):
     Older/plain requests (just a path) are still accepted by the server.
     """
     req = {"path": path}
-    # WHISPERQUILL_LANGUAGE pins a language (e.g. "en", "ur"); unset = auto-detect
-    language = language or os.environ.get("WHISPERQUILL_LANGUAGE") or None
+    # SOTTO_LANGUAGE pins a language (e.g. "en", "ur"); unset = auto-detect
+    language = language or os.environ.get("SOTTO_LANGUAGE") or None
     if language:
         req["language"] = language
     if prompt:

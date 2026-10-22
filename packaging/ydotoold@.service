@@ -1,15 +1,16 @@
 [Unit]
-Description=ydotoold for WhisperQuill (root, user-owned socket)
-Documentation=https://github.com/sahil2837j-eng/whisperquill
+Description=ydotoold for Sotto (root daemon, user-owned socket)
+Documentation=https://github.com/sahil2837j-eng/sotto
 After=local-fs.target
 Before=graphical.target
 
 [Service]
-# /run/user/<uid> only exists once the session is up; create it if we win the race
-ExecStartPre=/bin/sh -c 'mkdir -p /run/user/%i && chown %i:%i /run/user/%i && chmod 0700 /run/user/%i'
-ExecStart=/usr/bin/ydotoold --socket-path=/run/user/%i/.ydotool_socket --socket-perm=0600 --socket-own=%i:%i
+# /run/user/__UID__ only exists once the session is up; create it if we win the race
+ExecStartPre=/bin/sh -c 'mkdir -p /run/user/__UID__ && chown __UID__:__UID__ /run/user/__UID__ && chmod 0700 /run/user/__UID__'
+ExecStart=/usr/bin/ydotoold --socket-path=/run/user/__UID__/.ydotool_socket --socket-perm=0600 --socket-own=__UID__:__UID__
 Restart=always
 RestartSec=2
+# no sandboxing: it must hold /dev/uinput open
 
 [Install]
 WantedBy=multi-user.target

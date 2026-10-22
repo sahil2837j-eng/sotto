@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live streaming transcription for whisperquill.
+"""Live streaming transcription for sotto.
 
 Started by `dictate` when recording begins. It watches the growing recording,
 transcribes it in ~4 s slices and types each slice into the focused window as

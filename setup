@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# Sotto installer — one command in a terminal, then press Ctrl+Alt+Space.
+#
+#   ./setup              normal install, asks before each change
+#   ./setup --yes        no questions (still prints every step)
+#   ./setup --uninstall  remove Sotto, keep your recordings
+set -euo pipefail
+
+REPO="https://github.com/sahil2837j-eng/sotto"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
+DEST="${XDG_DATA_HOME:-$HOME/.local/share}/sotto"
+APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+UID_NUM="$(id -u)"
+ASSUME_YES=0
+UNINSTALL=0
+
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) ASSUME_YES=1 ;;
+        --uninstall|--remove) UNINSTALL=1 ;;
+        -h|--help) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "unknown option: $arg (try --help)"; exit 2 ;;
+    esac
+done
+
+if [ -t 1 ]; then
+    B=$'\033[1m'; D=$'\033[2m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'
+else
+    B=""; D=""; G=""; Y=""; R=""; N=""
+fi
+
+say()  { printf '%s\n' "$*"; }
+head2(){ printf '\n%s%s%s\n' "$B" "$*" "$N"; }
+ok()   { printf '   %s✔%s %s\n' "$G" "$N" "$*"; }
+warn() { printf '   %s!%s %s\n' "$Y" "$N" "$*"; }
+die()  { printf '\n%s✘ %s%s\n' "$R" "$*" "$N" >&2; exit 1; }
+
+ask() {
+    [ "$ASSUME_YES" = 1 ] && return 0
+    local reply
+    read -r -p "   $1 [Y/n] " reply || reply=""
+    case "${reply:-y}" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---------- uninstall ----------
+if [ "$UNINSTALL" = 1 ]; then
+    head2 "Removing Sotto"
+    if [ -f /etc/systemd/system/ydotoold@.service ]; then
+        sudo systemctl disable --now "ydotoold@$UID_NUM.service" 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/ydotoold@.service
+        sudo systemctl daemon-reload
+    fi
+    rm -f "$APPS/sotto.desktop"
+    rm -rf "$DEST"
+    have kbuildsycoca6 && kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+    ok "removed. Log out once to drop the old shortcut."
+    exit 0
+fi
+
+# ---------- source ----------
+if [ ! -f "$SRC/dictate" ]; then
+    head2 "Fetching Sotto"
+    have git || die "git is needed for the one-line install"
+    tmp="$(mktemp -d)"
+    git clone --depth 1 "$REPO" "$tmp/sotto" >/dev/null 2>&1 || die "could not clone $REPO"
+    SRC="$tmp/sotto"
+    ok "cloned to $SRC"
+fi
+
+say ""
+say "  ${B}Sotto${N} — offline voice typing for Linux"
+say "  ${D}speak quietly, it writes it down${N}"
+
+# ---------- 1. dependencies ----------
+head2 "1/6  checking the tools it needs"
+
+PM=""
+if have pacman; then PM=pacman
+elif have apt; then PM=apt
+elif have dnf; then PM=dnf
+fi
+
+need_pkgs=()
+check() { # command package
+    local cmd="$1" pkg="$2"
+    if have "$cmd"; then
+        ok "$cmd"
+        return
+    fi
+    warn "$cmd missing"
+    case "$PM" in
+        pacman) case "$pkg" in python|python3) need_pkgs+=("python") ;; *) need_pkgs+=("$pkg") ;; esac ;;
+        apt)    case "$pkg" in
+                    python|python3) need_pkgs+=("python3" "python3-venv") ;;
+                    pipewire)       need_pkgs+=("pipewire-bin") ;;
+                    *)              need_pkgs+=("$pkg") ;;
+                esac ;;
+        *)      need_pkgs+=("$pkg") ;;
+    esac
+}
+check python3 python
+check ffmpeg ffmpeg
+check ydotool ydotool
+check wl-copy wl-clipboard
+check pw-play pipewire
+check notify-send libnotify
+
+if [ "${#need_pkgs[@]}" -gt 0 ]; then
+    # keep one copy of each name, in first-seen order
+    uniq_pkgs=()
+    for p in "${need_pkgs[@]}"; do
+        case " ${uniq_pkgs[*]-} " in *" $p "*) ;; *) uniq_pkgs+=("$p") ;; esac
+    done
+    say ""
+    warn "missing packages: ${uniq_pkgs[*]}"
+    case "$PM" in
+        pacman)
+            say "   command: sudo pacman -S --needed ${uniq_pkgs[*]}"
+            ask "install them now?" && { sudo pacman -S --needed "${uniq_pkgs[@]}" || warn "pacman failed — install by hand and run ./setup again"; }
+            ;;
+        apt)
+            say "   command: sudo apt install ${uniq_pkgs[*]}"
+            ask "install them now?" && { sudo apt install -y "${uniq_pkgs[@]}" || warn "apt failed — install by hand and run ./setup again"; }
+            ;;
+        dnf)
+            say "   command: sudo dnf install ${uniq_pkgs[*]}"
+            ask "install them now?" && { sudo dnf install -y "${uniq_pkgs[@]}" || warn "dnf failed — install by hand and run ./setup again"; }
+            ;;
+        *)
+            warn "install these with your package manager, then run ./setup again"
+            ;;
+    esac
+fi
+
+# ---------- 2. files ----------
+head2 "2/6  installing to $DEST"
+mkdir -p "$DEST" "$DEST/sounds" "$DEST/assets" "$APPS"
+cp "$SRC"/dictate "$SRC"/streamer.py "$SRC"/model_server.py "$SRC"/transcribe.py "$SRC"/vdlib.py "$DEST"/
+cp "$SRC"/sounds/*.wav "$DEST/sounds"/
+cp "$SRC"/assets/icon.svg "$SRC"/assets/icon-256.png "$DEST/assets/" 2>/dev/null || true
+chmod +x "$DEST/dictate"
+ok "scripts copied"
+
+# ---------- 3. python env ----------
+head2 "3/6  speech engine (downloads faster-whisper, a few hundred MB)"
+if [ -x "$DEST/.venv/bin/python" ]; then
+    ok "keeping the existing venv"
+else
+    python3 -m venv "$DEST/.venv" || die "python venv failed — on Debian/Ubuntu install python3-venv"
+fi
+"$DEST/.venv/bin/pip" install --quiet --upgrade pip
+"$DEST/.venv/bin/pip" install --quiet --upgrade faster-whisper
+ok "engine ready"
+say "   ${D}the model itself downloads on first use: ~500 MB for small${N}"
+
+# ---------- 4. typing rights ----------
+head2 "4/6  permission to type into other windows (root, two files)"
+say "   ${D}Linux does not let a normal program type into other apps.${N}"
+say "   ${D}That needs /dev/uinput and a small daemon holding it open.${N}"
+
+if [ ! -e /dev/uinput ]; then
+    say ""
+    if ask "load the uinput kernel module now?"; then
+        sudo modprobe uinput
+        printf 'uinput\n' | sudo tee /etc/modules-load.d/uinput.conf >/dev/null
+        ok "uinput loaded, and set to load at boot"
+    fi
+else
+    ok "/dev/uinput exists"
+fi
+
+if [ -f /etc/modules-load.d/uinput.conf ]; then
+    ok "uinput will load at boot"
+fi
+
+if systemctl is-active --quiet "ydotoold@$UID_NUM.service" 2>/dev/null; then
+    ok "ydotoold running"
+elif ask "install and start the ydotoold daemon?"; then
+    sed "s|__UID__|$UID_NUM|g" "$SRC/packaging/ydotoold@.service" | sudo tee /etc/systemd/system/ydotoold@.service >/dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now "ydotoold@$UID_NUM.service"
+    sleep 0.5
+    systemctl is-active --quiet "ydotoold@$UID_NUM.service" \
+        && ok "ydotoold running" \
+        || warn "ydotoold did not start — journalctl -u ydotoold@$UID_NUM -n 20"
+fi
+
+# ---------- 5. shortcut ----------
+head2 "5/6  the hotkey: Ctrl+Alt+Space"
+sed -e "s|__EXEC__|$DEST/dictate|" \
+    -e "s|__ICON__|$DEST/assets/icon-256.png|" \
+    "$SRC/packaging/sotto.desktop" > "$APPS/sotto.desktop"
+ok "application entry written"
+have kbuildsycoca6 && kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+say "   ${D}if the shortcut does nothing yet, log out and back in once,${N}"
+say "   ${D}or set it by hand in System Settings → Keyboard → Shortcuts.${N}"
+
+# ---------- 6. check ----------
+head2 "6/6  checking"
+fail=0
+[ -x "$DEST/dictate" ] && ok "dictate" || { warn "dictate missing"; fail=1; }
+[ -x "$DEST/.venv/bin/python" ] && ok "python env" || { warn "venv missing"; fail=1; }
+[ -e /dev/uinput ] && ok "/dev/uinput" || { warn "/dev/uinput missing"; fail=1; }
+[ -S "/run/user/$UID_NUM/.ydotool_socket" ] && ok "ydotoold socket" || { warn "ydotoold socket missing"; fail=1; }
+[ -f "$APPS/sotto.desktop" ] && ok "shortcut entry" || { warn "shortcut entry missing"; fail=1; }
+
+say ""
+if [ "$fail" = 0 ]; then
+    say "  ${G}${B}Done.${N} Put your cursor in a text field and press ${B}Ctrl+Alt+Space${N}."
+    say "  ${D}Speak. Press it again. The words are already there.${N}"
+else
+    say "  ${Y}Almost.${N} The failed checks above have their fix in the README."
+    say "  ${D}Most common: uinput again — see Troubleshooting.${N}"
+fi
+say ""

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#140A2E"/>
+      <stop offset="0.55" stop-color="#1E0F4D"/>
+      <stop offset="1" stop-color="#062B3C"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#D9F4FF"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B0F8F"/>
+      <stop offset="0.55" stop-color="#6D28D9"/>
+      <stop offset="1" stop-color="#0891B2"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.85" cy="0.15" r="0.6">
+      <stop offset="0" stop-color="#7C3AED" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <g transform="translate(96,176) scale(0.5625)">
+    <rect width="512" height="512" rx="118" fill="url(#tile)"/>
+    <path d="M336 170 C 336 128 294 108 252 108 C 200 108 168 140 168 184
+             C 168 232 212 246 260 257 C 310 269 346 286 346 336
+             C 346 386 300 412 250 412 C 200 412 164 388 160 344"
+          fill="none" stroke="url(#mark)" stroke-width="54"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <g fill="#FFFFFF" opacity="0.5">
+      <rect x="378" y="318" width="12" height="34" rx="6"/>
+      <rect x="404" y="298" width="12" height="74" rx="6"/>
+      <rect x="430" y="326" width="12" height="18" rx="6"/>
+    </g>
+  </g>
+
+  <text x="440" y="270" font-family="Inter, Cantarell, DejaVu Sans, sans-serif" font-size="132" font-weight="700" fill="#FFFFFF">Sotto</text>
+  <text x="444" y="340" font-family="Inter, Cantarell, DejaVu Sans, sans-serif" font-size="40" fill="#C4B5FD">offline voice typing for Linux</text>
+  <text x="444" y="404" font-family="Inter, Cantarell, DejaVu Sans, sans-serif" font-size="30" fill="#8FA6B8">press once, talk, press again —</text>
+  <text x="444" y="446" font-family="Inter, Cantarell, DejaVu Sans, sans-serif" font-size="30" fill="#8FA6B8">the words are already there</text>
+</svg>
