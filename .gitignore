@@ -1,0 +1,14 @@
+# runtime state and personal data — never commit these
+state/
+*.log
+*.wav
+!sounds/*.wav
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# editors / os
+.DS_Store
+*.swp

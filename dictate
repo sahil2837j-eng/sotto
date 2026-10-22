@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+# Voice dictation toggle: press once to start listening, again to stop.
+#
+# While you are speaking, streamer.py transcribes the growing recording in
+# ~4 s slices and types each slice into the focused window, so text appears
+# live. Pressing the hotkey again finishes the tail and shows a summary of
+# what was typed. Takes that are too short for a live slice - and any run
+# where streaming failed - fall back to transcribing the whole take after the
+# fact (the original behaviour).
+#
+# Every take gets its own wav under state/takes/, and the recorder's pid file
+# records which wav belongs to it. That way starting a new take while the
+# previous one is still being finished can never overwrite or delete the
+# older take's audio.
+set -u
+
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE="$BASE/state"
+TAKES="$STATE/takes"
+PIDF="$STATE/recording.pid"     # fields: <recorder pid><TAB><absolute wav path>
+STREAM_PID="$STATE/stream.pid"
+STREAM_STATE="$STATE/stream.json"
+LAST_TAKE="$STATE/last_take.txt"
+BOOST_FILE="$STATE/power_boost"
+LOG="$BASE/dictate.log"
+PY="$BASE/.venv/bin/python"
+MAX_SECONDS=300
+HOTKEY="Ctrl+Alt+Space"
+
+mkdir -p "$STATE" "$TAKES"
+
+log()  { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
+notify() { notify-send -u "${3:-normal}" -t "${4:-6000}" "Voice dictation" "${2:-$1}" 2>/dev/null || true; }
+sound() { pw-play "$BASE/sounds/$1.wav" >/dev/null 2>&1 & }
+
+pid_alive() { kill -0 "$1" 2>/dev/null; }
+
+# PIDF line is "<pid>\t<wav path>". Old single-field lines are still accepted.
+recording_pid() {
+    [[ -f "$PIDF" ]] || return 1
+    local pid
+    pid=$(cut -f1 "$PIDF" 2>/dev/null)
+    [[ -n "$pid" ]] || return 1
+    pid_alive "$pid" || return 1
+    printf '%s' "$pid"
+}
+
+recording_wav() {
+    [[ -f "$PIDF" ]] || return 1
+    local w
+    w=$(cut -f2 "$PIDF" 2>/dev/null)
+    [[ -n "$w" ]] || return 1
+    printf '%s' "$w"
+}
+
+stream_pid() {
+    [[ -f "$STREAM_PID" ]] || return 1
+    local pid
+    pid=$(cat "$STREAM_PID" 2>/dev/null)
+    [[ -n "$pid" ]] || return 1
+    pid_alive "$pid" || return 1
+    printf '%s' "$pid"
+}
+
+# ---- power-profile boost ----------------------------------------------------
+# "power-saver" pins the CPU at ~0.8 GHz instead of 3.6 GHz, which makes
+# Whisper about 3x slower (measured: 10.8s vs 3.4s for the same clip). Because
+# transcription now runs *during* recording, the profile is raised for the
+# whole take and put back when it ends. The marker file makes boost/restore
+# work across the two separate hotkey presses (start process vs stop process),
+# and restore only fires if nothing else changed the profile in between.
+PPCTL=$(command -v powerprofilesctl || true)
+
+boost_profile() {
+    [[ -n "$PPCTL" ]] || return 0
+    [[ -f "$BOOST_FILE" ]] && return 0
+    local cur
+    cur=$("$PPCTL" get 2>/dev/null || true)
+    if [[ "$cur" == "power-saver" ]] && "$PPCTL" set balanced >/dev/null 2>&1; then
+        printf '%s' "$cur" > "$BOOST_FILE"
+        log "boost: $cur -> balanced for dictation"
+    fi
+}
+
+restore_profile() {
+    [[ -n "$PPCTL" && -f "$BOOST_FILE" ]] || return 0
+    local orig cur
+    orig=$(cat "$BOOST_FILE" 2>/dev/null || true)
+    cur=$("$PPCTL" get 2>/dev/null || true)
+    if [[ -n "$orig" && "$cur" == "balanced" ]]; then
+        "$PPCTL" set "$orig" >/dev/null 2>&1 || true
+        log "boost: restored profile '$orig'"
+    else
+        log "boost: profile now '$cur', leaving it (changed outside dictation)"
+    fi
+    rm -f "$BOOST_FILE"
+}
+
+stop_recording() {
+    local pid="$1"
+    kill -TERM "$pid" 2>/dev/null
+    for _ in $(seq 1 60); do
+        pid_alive "$pid" || break
+        sleep 0.1
+    done
+    kill -KILL "$pid" 2>/dev/null
+}
+
+# Ask the streamer to finish the last slice and exit, then make sure it is gone.
+stop_streamer() {
+    local spid
+    spid=$(stream_pid) || return 0
+    kill -TERM "$spid" 2>/dev/null
+    for _ in $(seq 1 300); do
+        pid_alive "$spid" || break
+        sleep 0.2
+    done
+    kill -KILL "$spid" 2>/dev/null
+    rm -f "$STREAM_PID"
+}
+
+# ---------- start ----------
+if ! pid=$(recording_pid); then
+    # Take the pidfile out of circulation first so a stop that races us here
+    # sees "no take" instead of acting on a wav we are about to replace.
+    rm -f "$PIDF"
+
+    wav="$TAKES/rec-$(date +%s)-$$.wav"
+    rm -f "$STREAM_STATE" "$LAST_TAKE"
+
+    pw-record --rate 16000 --channels 1 --format s16 "$wav" >/dev/null 2>&1 &
+    pid=$!
+    printf '%s\t%s\n' "$pid" "$wav" > "$PIDF"
+    sleep 0.7
+    if ! pid_alive "$pid"; then
+        log "start: pw-record died immediately"
+        rm -f "$PIDF" "$wav"
+        notify "Couldn't start the microphone."
+        exit 1
+    fi
+
+    # Live transcription runs while recording, so give the CPU headroom for the
+    # whole take; restore_profile puts it back when the take ends.
+    boost_profile
+
+    # Safety net: never leave the mic open.
+    (
+        sleep "$MAX_SECONDS"
+        if pid_alive "$pid"; then
+            log "start: safety timeout after ${MAX_SECONDS}s, stopping"
+            kill -TERM "$pid" 2>/dev/null
+            restore_profile
+        fi
+    ) >/dev/null 2>&1 &
+    disown
+
+    "$PY" "$BASE/streamer.py" "$wav" >>"$LOG" 2>&1 &
+    spid=$!
+    echo "$spid" > "$STREAM_PID"
+    sleep 0.5
+    if ! pid_alive "$spid"; then
+        log "start: streamer did not start - will transcribe the whole take on stop"
+        restore_profile
+    fi
+
+    log "start: recording pid=$pid streamer=$spid wav=$wav"
+    sound start
+    notify "Listening — words appear as you speak. Press $HOTKEY to stop." "Listening" low 8000
+    exit 0
+fi
+
+# ---------- stop ----------
+# Claim this take's own wav now, before any waiting. A newer take that starts
+# while we finish will use a different file, so nothing here can touch it.
+wav=$(recording_wav || printf '%s' "$STATE/recording.wav")
+sound stop
+stop_recording "$pid"
+rm -f "$PIDF"
+notify "Finishing the last words…" "" low 4000
+stop_streamer
+
+# Read what the live pass produced (status/word count/language).
+status=""; words=0; lang="?"
+if [[ -f "$STREAM_STATE" ]]; then
+    read -r status words lang < <("$PY" -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    d = {}
+print("%s %s %s" % (d.get("status", ""), int(d.get("words", 0) or 0), d.get("lang") or "?"))
+' "$STREAM_STATE" 2>/dev/null) || true
+fi
+words=${words:-0}
+
+if [[ "$words" -gt 0 ]]; then
+    # Live path: the text was already typed into your window as you spoke.
+    preview=$(tail -c 240 "$LAST_TAKE" 2>/dev/null | tr '\n' ' ')
+    log "stop: live path words=$words lang=$lang status=$status"
+    body=$(printf 'Typed %s words as you spoke (%s). Last words:\n%s' "$words" "$lang" "$preview")
+    if [[ "$status" == "error" ]]; then
+        notify "done" "$body
+(Streamer stopped early, so the end of the take may be missing.)" low 12000
+    else
+        notify "done" "$body" low 12000
+    fi
+    rm -f "$wav"
+    exit 0
+fi
+
+# ---- fallback: nothing was typed live, transcribe the whole take now ----
+size=$(stat -c %s "$wav" 2>/dev/null || echo 0)
+dur=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$wav" 2>/dev/null || echo 0)
+log "stop: live pass produced nothing (size=$size dur=${dur}s); full-take fallback"
+if (( size < 20000 )) || awk "BEGIN{exit !(${dur:-0} < 0.6)}"; then
+    log "stop: audio too short (${dur}s)"
+    notify "Too short — hold the thought for half a second or more."
+    rm -f "$wav"
+    restore_profile
+    exit 0
+fi
+
+log "stop: transcribing (${dur}s of audio)"
+notify "Transcribing ${dur}s…" "" normal 8000
+
+# Transcribe this take in place. It already has a unique name, so a newer
+# take recording at the same time is unaffected.
+boost_profile
+text=$("$PY" "$BASE/transcribe.py" "$wav" 2>>"$LOG")
+rc=$?
+rm -f "$wav"
+restore_profile
+
+if [[ $rc -ne 0 ]]; then
+    if [[ $rc -eq 3 ]]; then
+        log "stop: no speech recognised"
+        notify "Heard nothing recognisable."
+        exit 0
+    fi
+    log "stop: transcription error rc=$rc"
+    notify "Transcription failed — see $LOG" "" critical 10000
+    exit 1
+fi
+if [[ -z "$text" ]]; then
+    log "stop: empty result"
+    notify "Heard nothing recognisable."
+    exit 0
+fi
+
+log "stop: inserted '$text'"
+
+# Show what was actually heard, so a wrong transcription is obvious at a
+# glance instead of silently sitting in the document.
+preview="$text"
+if (( ${#preview} > 300 )); then preview="${preview:0:297}…"; fi
+body=$(printf 'Typed %ss of speech into your window:\n%s' "${dur%.*}" "$preview")
+notify "done" "$body" low 12000
+exit 0
