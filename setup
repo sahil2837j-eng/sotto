@@ -44,6 +44,26 @@ ask() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# run a slow command behind a spinner, so it never looks frozen
+run_spin() {
+    local msg="$1"; shift
+    if [ ! -t 1 ]; then
+        "$@"
+        return
+    fi
+    "$@" &
+    local pid=$! i=0 rc=0
+    local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '\r   %s %s' "${frames:i%10:1}" "$msg"
+        i=$((i + 1))
+        sleep 0.12
+    done
+    wait "$pid" || rc=$?
+    printf '\r\033[K'
+    return $rc
+}
+
 # ---------- uninstall ----------
 if [ "$UNINSTALL" = 1 ]; then
     head2 "Removing Sotto"
@@ -72,6 +92,10 @@ fi
 say ""
 say "  ${B}Sotto${N} — offline voice typing for Linux"
 say "  ${D}speak quietly, it writes it down${N}"
+say ""
+say "  ${D}This takes 3 to 5 minutes and needs internet.${N}"
+say "  ${D}It downloads ~300 MB of Python packages and a ~500 MB speech model.${N}"
+say "  ${D}Nothing on your system changes without asking first.${N}"
 
 # ---------- 1. dependencies ----------
 head2 "1/6  checking the tools it needs"
@@ -143,17 +167,48 @@ cp "$SRC"/assets/icon.svg "$SRC"/assets/icon-256.png "$DEST/assets/" 2>/dev/null
 chmod +x "$DEST/dictate"
 ok "scripts copied"
 
-# ---------- 3. python env ----------
-head2 "3/6  speech engine (downloads faster-whisper, a few hundred MB)"
+# ---------- 3. engine and model ----------
+head2 "3/6  the speech engine and its model"
 if [ -x "$DEST/.venv/bin/python" ]; then
-    ok "keeping the existing venv"
+    ok "keeping the existing python environment"
 else
+    say "   creating a private python environment — nothing global is touched"
     python3 -m venv "$DEST/.venv" || die "python venv failed — on Debian/Ubuntu install python3-venv"
+    ok "environment created"
 fi
-"$DEST/.venv/bin/pip" install --quiet --upgrade pip
-"$DEST/.venv/bin/pip" install --quiet --upgrade faster-whisper
-ok "engine ready"
-say "   ${D}the model itself downloads on first use: ~500 MB for small${N}"
+
+run_spin "updating pip" \
+    "$DEST/.venv/bin/pip" install --quiet --upgrade pip || true
+run_spin "installing faster-whisper (1-3 min, silence is normal)" \
+    "$DEST/.venv/bin/pip" install --quiet --upgrade faster-whisper \
+    || die "install failed — check your internet, then run ./setup again"
+ok "engine installed"
+
+MODEL="${SOTTO_MODEL:-small}"
+case "$MODEL" in
+    base)   MODEL_SIZE="145 MB" ;;
+    small)  MODEL_SIZE="500 MB" ;;
+    medium) MODEL_SIZE="1.5 GB" ;;
+    large*) MODEL_SIZE="3 GB" ;;
+    *)      MODEL_SIZE="a few hundred MB" ;;
+esac
+say ""
+say "   The model is what turns sound into words."
+say "   ${B}$MODEL${N} — about $MODEL_SIZE, downloaded once, then offline forever."
+if ask "download it now? (then your first sentence needs no waiting)"; then
+    if run_spin "downloading the $MODEL model — $MODEL_SIZE" \
+        "$DEST/.venv/bin/python" -c 'import sys, time
+from faster_whisper import WhisperModel
+t = time.time()
+WhisperModel(sys.argv[1], device="cpu", compute_type="int8", cpu_threads=4)
+print(f"model ready in {time.time() - t:.0f}s")' "$MODEL"; then
+        ok "model ready"
+    else
+        warn "download failed — it will retry on your first dictation"
+    fi
+else
+    warn "skipped — it downloads on your first dictation instead"
+fi
 
 # ---------- 4. typing rights ----------
 head2 "4/6  permission to type into other windows (root, two files)"
