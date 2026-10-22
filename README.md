@@ -24,14 +24,22 @@ subscription.
 Sotto is that last step. It records, transcribes locally, and types the result
 wherever your cursor is, while you are still speaking.
 
+If you have been searching for *Whisper for Linux* — this is the half that
+types.
+
 ## Install
 
-One command in a terminal:
+Two commands:
 
 ```bash
 git clone https://github.com/sahil2837j-eng/sotto.git
-cd sotto
-./setup
+cd sotto && ./setup
+```
+
+Or, if you would rather not clone first — the script fetches its own files:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sahil2837j-eng/sotto/main/setup | bash
 ```
 
 The installer walks six steps and asks before each change:
