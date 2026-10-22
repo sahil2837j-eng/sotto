@@ -175,7 +175,10 @@ if [ -f /etc/modules-load.d/uinput.conf ]; then
     ok "uinput will load at boot"
 fi
 
-if systemctl is-active --quiet "ydotoold@$UID_NUM.service" 2>/dev/null; then
+SOCKET="/run/user/$UID_NUM/.ydotool_socket"
+if [ -S "$SOCKET" ]; then
+    ok "a typing daemon is already running (socket present)"
+elif systemctl is-active --quiet "ydotoold@$UID_NUM.service" 2>/dev/null; then
     ok "ydotoold running"
 elif ask "install and start the ydotoold daemon?"; then
     sed "s|__UID__|$UID_NUM|g" "$SRC/packaging/ydotoold@.service" | sudo tee /etc/systemd/system/ydotoold@.service >/dev/null
