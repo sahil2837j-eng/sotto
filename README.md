@@ -7,6 +7,11 @@
 <p align="center"><b>Offline voice typing for Linux.</b><br>
 Press two keys, talk, press them again — the words land in whatever field your cursor is in.</p>
 
+<p align="center">
+  <img src="assets/demo.gif" width="880" alt="Sotto typing a dictated sentence into a notes window">
+</p>
+<p align="center"><sub>Re-created for this page — the real thing types at this pace.</sub></p>
+
 ---
 
 *Sotto voce* is Italian for "in a low voice". You mutter under your breath;

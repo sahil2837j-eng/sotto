@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sotto demo</title>
+<style>
+  :root{
+    --violet:#7C3AED; --violet-2:#A78BFA; --cyan:#22D3EE;
+    --ink:#EDE9FE; --muted:#A99FD0; --line:rgba(255,255,255,.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:1280px;height:720px;overflow:hidden}
+  body{
+    font-family:"Cantarell","Fira Sans","DejaVu Sans",sans-serif;
+    background:#0B0718; color:var(--ink);
+  }
+  .stage{
+    position:relative; width:1280px; height:720px;
+    background:
+      radial-gradient(900px 520px at 18% 8%, rgba(124,58,237,.34), transparent 62%),
+      radial-gradient(760px 520px at 88% 96%, rgba(8,145,178,.30), transparent 60%),
+      linear-gradient(135deg,#150A30 0%,#100A24 45%,#071A24 100%);
+  }
+  .grain{
+    position:absolute; inset:0; opacity:.16; pointer-events:none;
+    background-image:radial-gradient(rgba(255,255,255,.22) 1px, transparent 1px);
+    background-size:3px 3px; mix-blend-mode:overlay;
+  }
+
+  .window{
+    position:absolute; left:160px; top:96px; width:960px; height:404px;
+    background:linear-gradient(180deg, rgba(30,18,60,.96), rgba(18,11,38,.98));
+    border:1px solid var(--line); border-radius:18px;
+    box-shadow:0 40px 90px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+    overflow:hidden;
+  }
+  .titlebar{
+    height:46px; display:flex; align-items:center; gap:10px;
+    padding:0 18px; border-bottom:1px solid rgba(255,255,255,.07);
+    background:rgba(255,255,255,.02);
+  }
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#F87171}.dot.y{background:#FBBF24}.dot.g{background:#34D399}
+  .filename{
+    margin-left:8px; font-size:13.5px; letter-spacing:.2px;
+    color:#B9AEDC;
+  }
+  .filename b{color:#E7E1FF;font-weight:600}
+
+  .doc{
+    position:relative; padding:56px 64px 0; height:calc(100% - 46px);
+    font-size:31px; line-height:1.62; letter-spacing:.1px;
+    color:#F5F2FF;
+  }
+  .doc .row{min-height:50px}
+  .word{opacity:0}
+  .caret{
+    display:inline-block; width:2px; height:34px; margin-left:2px;
+    background:var(--violet-2); vertical-align:-6px; border-radius:2px;
+    box-shadow:0 0 12px rgba(167,139,250,.9);
+  }
+  .doc .placeholder{color:#6E6394; font-size:19px; letter-spacing:.1px}
+
+  .pill{
+    position:absolute; left:50%; bottom:104px; transform:translateX(-50%) scale(1);
+    display:flex; align-items:center; gap:14px;
+    height:62px; padding:0 22px 0 16px; min-width:430px;
+    background:rgba(22,12,46,.92);
+    border:1px solid rgba(255,255,255,.13); border-radius:31px;
+    box-shadow:0 18px 50px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.07);
+    transition:none;
+  }
+  .pill .icon{width:34px;height:34px;flex:none}
+  .keys{display:flex;align-items:center;gap:7px}
+  kbd{
+    font-family:inherit; font-size:13.5px; font-weight:600; color:#D9D1F5;
+    background:#241748; border:1px solid rgba(255,255,255,.10);
+    border-bottom:2px solid rgba(0,0,0,.55);
+    padding:4px 9px; border-radius:7px; letter-spacing:.2px;
+  }
+  kbd.on{background:#4C2A9E; color:#fff; border-color:#8B5CF6}
+  .live{display:flex; align-items:center; gap:9px; margin-left:2px}
+  .bars{display:flex; align-items:center; gap:3px; height:26px}
+  .bars i{width:3px; border-radius:2px; background:var(--cyan); display:block}
+  .label{font-size:14px; color:#C9BFF0; min-width:86px}
+  .dotlive{
+    width:8px;height:8px;border-radius:50%;background:#FB7185;
+    box-shadow:0 0 10px rgba(251,113,133,.9);
+  }
+  .check{
+    width:20px;height:20px;border-radius:50%;
+    background:rgba(52,211,153,.16); border:1px solid rgba(52,211,153,.5);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .stack{display:flex;align-items:center;gap:12px;flex:none}
+
+  .subtitle{
+    position:absolute; left:0; right:0; bottom:44px; text-align:center;
+    font-size:18.5px; letter-spacing:.4px; color:#CFC4F2;
+  }
+  .brand{
+    position:absolute; left:64px; bottom:44px; display:flex; align-items:center; gap:10px;
+    opacity:.55; font-size:14px; letter-spacing:.6px; text-transform:lowercase;
+  }
+  .brand img{width:18px;height:18px}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="grain"></div>
+
+  <div class="window">
+    <div class="titlebar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="filename"><b>notes.md</b> — unsaved</span>
+    </div>
+    <div class="doc">
+      <div class="row" id="line1"><span class="placeholder" id="placeholder">click into any text field…</span></div>
+      <div class="caret" id="caret"></div>
+    </div>
+  </div>
+
+  <div class="pill" id="pill">
+    <svg class="icon" viewBox="0 0 512 512" aria-hidden="true">
+      <defs>
+        <linearGradient id="ibg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#3B0F8F"/><stop offset=".55" stop-color="#6D28D9"/><stop offset="1" stop-color="#0891B2"/>
+        </linearGradient>
+      </defs>
+      <rect width="512" height="512" rx="118" fill="url(#ibg)"/>
+      <path d="M336 170 C 336 128 294 108 252 108 C 200 108 168 140 168 184
+               C 168 232 212 246 260 257 C 310 269 346 286 346 336
+               C 346 386 300 412 250 412 C 200 412 164 388 160 344"
+            fill="none" stroke="#fff" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="keys" id="keys">
+      <kbd id="k1">Ctrl</kbd><kbd id="k2">Alt</kbd><kbd id="k3">Space</kbd>
+    </div>
+    <div class="stack" id="live" style="visibility:hidden">
+      <span class="dotlive" id="reddot" style="display:none"></span>
+      <div class="bars" id="bars">
+        <i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <span class="check" id="check" style="display:none">✓</span>
+      <span class="label" id="label"></span>
+    </div>
+  </div>
+
+  <div class="subtitle" id="sub"></div>
+  <div class="brand"><img src="../../assets/icon-256.png" alt=""> sotto</div>
+</div>
+
+<script>
+const WORDS = [
+  ["Meeting",   6500], ["moved",    6690], ["to",       6900],
+  ["Thursday",  7350], ["at",       7540], ["three.",   7770],
+  ["Please",    8250], ["bring",    8430], ["the",      8660],
+  ["draft.",    8990],
+];
+const SUBS = [
+  [0,    1550, "Click any text field."],
+  [1550, 2500, "Press Ctrl+Alt+Space."],
+  [2500, 6200, "Speak. Give it a moment."],
+  [6200, 9600, "Words appear as you talk."],
+  [9600, 10600, "Press again. Done."],
+  [10600, 12300, "Offline. Nothing leaves your machine."],
+];
+const T_END = 12600;
+
+const line = document.getElementById("line1");
+const placeholder = document.getElementById("placeholder");
+const caret = document.getElementById("caret");
+const pill = document.getElementById("pill");
+const k1 = document.getElementById("k1"), k2 = document.getElementById("k2"), k3 = document.getElementById("k3");
+const live = document.getElementById("live");
+const reddot = document.getElementById("reddot");
+const bars = [...document.querySelectorAll("#bars i")];
+const label = document.getElementById("label");
+const check = document.getElementById("check");
+const sub = document.getElementById("sub");
+
+// build word spans once
+const spans = WORDS.map(([w, t]) => {
+  const s = document.createElement("span");
+  s.className = "word";
+  s.textContent = w;
+  s.dataset.t = t;
+  s.style.marginRight = "11px";
+  return s;
+});
+
+function ease(x){ return x < 0 ? 0 : x > 1 ? 1 : x*x*(3-2*x); }
+
+function renderAt(t) {
+  const pressed = (t >= 1500 && t < 1760) || (t >= 9600 && t < 9860);
+  const listening = t >= 1900 && t < 9600;
+  const done = t >= 9860 && t < 10600;
+
+  // ---- text ----
+  const fadeOut = t > 12100 ? 1 - ease((t - 12100) / 480) : 1;
+  let lastVisible = null;
+  spans.forEach((s, i) => {
+    const at = WORDS[i][1];
+    if (t >= at && !s.parentNode) line.appendChild(s);
+    const age = t - at;
+    const settle = ease(age / 220);              // grey -> full, like a stream settling
+    s.style.opacity = t >= at ? String((0.55 + 0.45 * settle) * fadeOut) : "0";
+    if (t >= at) lastVisible = s;
+  });
+
+  if (lastVisible) {
+    placeholder.style.display = "none";
+    if (caret.previousElementSibling !== lastVisible) line.appendChild(caret);
+    caret.style.opacity = String((0.9 * fadeOut));
+  } else {
+    placeholder.style.display = "";
+    placeholder.style.opacity = String(0.9 * fadeOut);
+    line.appendChild(caret);
+    caret.style.opacity = String(0.85 * fadeOut);
+  }
+  // caret blink
+  if (Math.floor(t / 530) % 2 === 1) caret.style.opacity = "0";
+
+  // ---- pill ----
+  pill.style.transform = "translateX(-50%) scale(" + (pressed ? 1.045 : 1) + ")";
+  [k1, k2, k3].forEach(k => k.classList.toggle("on", pressed));
+
+  live.style.visibility = (listening || done) ? "visible" : "hidden";
+  reddot.style.display = listening ? "block" : "none";
+  bars.forEach((b, i) => {
+    b.style.display = listening ? "block" : "none";
+    if (listening) {
+      const h = 6 + 17 * Math.abs(Math.sin(t / 155 + i * 1.9)) * (0.55 + 0.45 * Math.abs(Math.sin(t / 480 + i)));
+      b.style.height = h.toFixed(1) + "px";
+      b.style.opacity = String(0.65 + 0.35 * Math.abs(Math.sin(t / 300 + i)));
+    }
+  });
+  label.textContent = listening ? "listening…" : done ? "done" : "";
+  reddot.style.opacity = listening ? String(0.55 + 0.45 * Math.abs(Math.sin(t / 260))) : "0";
+  check.style.display = done ? "flex" : "none";
+
+  // ---- subtitle ----
+  let text = "", alpha = 0;
+  for (const [a, b, s] of SUBS) {
+    if (t >= a && t < b) {
+      text = s;
+      alpha = Math.min(ease((t - a) / 240), ease((b - t) / 240));
+    }
+  }
+  sub.textContent = text;
+  sub.style.opacity = alpha.toFixed(3);
+}
+
+// deterministic hook for the recorder, plus a live preview loop
+window.renderAt = renderAt;
+if (!location.search.includes("record")) {
+  const t0 = performance.now();
+  (function loop(now) { renderAt((now - t0) % T_END); requestAnimationFrame(loop); })(t0);
+}
+renderAt(0);
+</script>
+</body>
+</html>
