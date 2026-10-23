@@ -5,7 +5,12 @@
 <h1 align="center">Sotto</h1>
 
 <p align="center"><b>Offline voice typing for Linux.</b><br>
-Press two keys, talk, press them again — the words land in whatever field your cursor is in.</p>
+One shortcut. Talk. Press it again — the words land in whatever field your cursor is in.</p>
+
+<p align="center">
+  <b>Shortcut: <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd></b><br>
+  <sub>Press once to start listening; press the same shortcut again to stop and type the rest. There is no separate stop key.</sub>
+</p>
 
 <p align="center">
   <img src="assets/demo.gif" width="880" alt="Sotto typing a dictated sentence into a notes window">
@@ -53,7 +58,7 @@ The installer walks six steps and asks before each change:
 2. copies itself to `~/.local/share/sotto`
 3. builds a small Python environment with `faster-whisper`
 4. loads the `uinput` kernel module and starts the typing daemon
-5. writes the application entry that carries the shortcut
+5. writes the application entry that carries the `Ctrl+Alt+Space` shortcut
 6. checks every piece and tells you what (if anything) is still wrong
 
 The two root-level things are unavoidable, because Linux does not let a normal
@@ -78,9 +83,18 @@ Uninstall with `./setup --uninstall`. Your recordings are left alone.
 ## Use
 
 1. Put the cursor where the text should go.
-2. Press `Ctrl+Alt+Space`. A beep, and the listening strip appears.
+2. Press **<kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd>** — hold
+   <kbd>Ctrl</kbd> and <kbd>Alt</kbd>, tap <kbd>Space</kbd>. A beep, and the
+   listening strip appears.
 3. Talk. Words start appearing after about five seconds.
-4. Press `Ctrl+Alt+Space` again. Second beep, the strip leaves, the rest lands.
+4. Press **the same shortcut** again. Second beep, the strip leaves, the rest
+   lands.
+
+> **Start and stop use the same shortcut.** It is a toggle; there is no second
+> hotkey to learn.
+
+To change it, edit the **Sotto** entry in System Settings → Keyboard →
+Shortcuts.
 
 It streams: each ~3 second slice is transcribed and typed while the next one
 is still being recorded. You are not waiting for the whole take.
@@ -168,8 +182,9 @@ of typing. Wait for the beep before clicking away.
 **Urdu comes out as broken English.** Pin the language with
 `SOTTO_LANGUAGE=ur`, or move from `base` to `small` or `medium`.
 
-**The shortcut does nothing.** Log out and back in once so KDE picks up the new
-entry, or bind it by hand in System Settings → Keyboard → Shortcuts.
+**<kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> does nothing.** Log out
+and back in once so KDE picks up the new entry, or bind it by hand in System
+Settings → Keyboard → Shortcuts.
 
 ## Files
 
