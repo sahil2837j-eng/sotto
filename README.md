@@ -13,10 +13,6 @@ Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd>, talk, press it again 
 </p>
 
 <p align="center">
-  <img src="assets/shortcut.gif" width="760" alt="Ctrl + Alt + Space: press once to start listening, press the same keys again to stop">
-</p>
-
-<p align="center">
   <img src="assets/demo.gif" width="880" alt="Sotto typing a dictated sentence into a notes window">
 </p>
 <p align="center"><sub>Re-created for this page — the real thing types at this pace.</sub></p>
