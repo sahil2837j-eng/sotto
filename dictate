@@ -247,6 +247,7 @@ words=${words:-0}
 
 if [[ "$words" -gt 0 ]]; then
     # Live path: the text was already typed into your window as you spoke.
+    restore_profile
     log "stop: live path words=$words lang=$lang status=$status"
     rm -f "$wav"
     exit 0
