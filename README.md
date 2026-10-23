@@ -132,17 +132,21 @@ model load.
 
 ## Troubleshooting
 
-**It listens and notifies, but nothing is typed.** This is almost always
-`uinput`. Look for `failed to open uinput device` in the log.
+**It hears you, but nothing is typed.** Almost always one of two things: the
+`uinput` device, or a typing daemon whose socket vanished. Older installs kept
+that socket in `/run/user`, which logind recreates at login — the daemon keeps
+running, the client can no longer connect, and the log says
+`insert failed: ydotool type:`.
 
 ```bash
 ls /dev/uinput                       # must exist
-lsmod | grep uinput                  # must be listed
-systemctl is-active ydotoold@$(id -u)   # must say active
-journalctl -u ydotoold@$(id -u) -n 20   # explains why it is not
+ls -l /run/ydotoold-$(id -u).socket  # must exist
+systemctl is-active ydotoold@$(id -u) || systemctl is-active ydotoold.service
+journalctl -u ydotoold@$(id -u) -n 20
 ```
 
-Fix the three root steps above. Nothing else in the app can cause "no text".
+Re-run `./setup --yes`: it rewrites the daemon unit with the socket in `/run`
+and restarts it. `dictate` finds the socket by itself.
 
 **It types into the wrong place.** Text goes wherever focus is at the moment
 of typing. Wait for the beep before clicking away.

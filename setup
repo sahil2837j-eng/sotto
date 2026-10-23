@@ -11,6 +11,7 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
 DEST="${XDG_DATA_HOME:-$HOME/.local/share}/sotto"
 APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 UID_NUM="$(id -u)"
+GID_NUM="$(id -g)"
 ASSUME_YES=0
 UNINSTALL=0
 
@@ -243,18 +244,39 @@ if [ -f /etc/modules-load.d/uinput.conf ]; then
     ok "uinput will load at boot"
 fi
 
-SOCKET="/run/user/$UID_NUM/.ydotool_socket"
+SOCKET="/run/ydotoold-$UID_NUM.socket"
+UNIT="ydotoold@$UID_NUM.service"
+# Older installs (and some manual setups) use a non-template unit name.
+if [ -f /etc/systemd/system/ydotoold.service ]; then
+    UNIT="ydotoold.service"
+fi
+
+install_unit() {
+    sed -e "s|__UID__|$UID_NUM|g" -e "s|__GID__|$GID_NUM|g" \
+        "$SRC/packaging/ydotoold@.service" \
+        | sudo tee "/etc/systemd/system/$1" >/dev/null
+    sudo systemctl daemon-reload
+}
+
 if [ -S "$SOCKET" ]; then
     ok "a typing daemon is already running (socket present)"
-elif systemctl is-active --quiet "ydotoold@$UID_NUM.service" 2>/dev/null; then
-    ok "ydotoold running"
+elif systemctl is-active --quiet "$UNIT" 2>/dev/null \
+  || systemctl is-active --quiet "ydotoold@$UID_NUM.service" 2>/dev/null; then
+    # Running, but with its socket in the old /run/user path that logind
+    # unlinks at login. Rewrite the unit and restart it once.
+    if ask "restart the typing daemon so its socket survives logout?"; then
+        install_unit "$UNIT"
+        sudo systemctl restart "$UNIT" 2>/dev/null || true
+        sleep 0.5
+        [ -S "$SOCKET" ] && ok "ydotoold running (socket at $SOCKET)" \
+            || warn "ydotoold did not restart — journalctl -u $UNIT -n 20"
+    fi
 elif ask "install and start the ydotoold daemon?"; then
-    sed "s|__UID__|$UID_NUM|g" "$SRC/packaging/ydotoold@.service" | sudo tee /etc/systemd/system/ydotoold@.service >/dev/null
-    sudo systemctl daemon-reload
+    install_unit "ydotoold@$UID_NUM.service"
     sudo systemctl enable --now "ydotoold@$UID_NUM.service"
     sleep 0.5
     systemctl is-active --quiet "ydotoold@$UID_NUM.service" \
-        && ok "ydotoold running" \
+        && ok "ydotoold running (socket at $SOCKET)" \
         || warn "ydotoold did not start — journalctl -u ydotoold@$UID_NUM -n 20"
 fi
 
@@ -274,7 +296,11 @@ fail=0
 [ -x "$DEST/dictate" ] && ok "dictate" || { warn "dictate missing"; fail=1; }
 [ -x "$DEST/.venv/bin/python" ] && ok "python env" || { warn "venv missing"; fail=1; }
 [ -e /dev/uinput ] && ok "/dev/uinput" || { warn "/dev/uinput missing"; fail=1; }
-[ -S "/run/user/$UID_NUM/.ydotool_socket" ] && ok "ydotoold socket" || { warn "ydotoold socket missing"; fail=1; }
+if [ -S "/run/ydotoold-$UID_NUM.socket" ] || [ -S "/run/user/$UID_NUM/.ydotool_socket" ]; then
+    ok "ydotoold socket"
+else
+    warn "ydotoold socket missing"; fail=1
+fi
 [ -f "$APPS/sotto.desktop" ] && ok "shortcut entry" || { warn "shortcut entry missing"; fail=1; }
 
 say ""

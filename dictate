@@ -31,6 +31,20 @@ HOTKEY="Ctrl+Alt+Space"
 
 mkdir -p "$STATE" "$TAKES"
 
+# ydotool talks to the daemon through a socket. The installer puts it at
+# /run/ydotoold-<uid>.socket, outside /run/user, because logind recreates
+# the session directory at login and a socket inside it silently disappears
+# (the daemon keeps running, the client can no longer connect).
+if [[ -z "${YDOTOOL_SOCKET:-}" ]]; then
+    for sock in "/run/ydotoold-$(id -u).socket" /run/ydotoold.socket \
+                "/run/user/$(id -u)/.ydotool_socket" /tmp/.ydotool_socket; do
+        if [[ -S "$sock" ]]; then
+            export YDOTOOL_SOCKET="$sock"
+            break
+        fi
+    done
+fi
+
 log()  { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
 notify() { notify-send -u "${3:-normal}" -t "${4:-6000}" "Voice dictation" "${2:-$1}" 2>/dev/null || true; }
 sound() { pw-play "$BASE/sounds/$1.wav" >/dev/null 2>&1 & }
@@ -205,7 +219,6 @@ if ! pid=$(recording_pid); then
     log "start: recording pid=$pid streamer=$spid wav=$wav"
     start_indicator "$pid" "$wav"
     sound start
-    notify "Listening — words appear as you speak. Press $HOTKEY to stop." "Listening" low 8000
     exit 0
 fi
 
@@ -217,7 +230,6 @@ sound stop
 stop_indicator
 stop_recording "$pid"
 rm -f "$PIDF"
-notify "Finishing the last words…" "" low 4000
 stop_streamer
 
 # Read what the live pass produced (status/word count/language).
@@ -236,15 +248,7 @@ words=${words:-0}
 
 if [[ "$words" -gt 0 ]]; then
     # Live path: the text was already typed into your window as you spoke.
-    preview=$(tail -c 240 "$LAST_TAKE" 2>/dev/null | tr '\n' ' ')
     log "stop: live path words=$words lang=$lang status=$status"
-    body=$(printf 'Typed %s words as you spoke (%s). Last words:\n%s' "$words" "$lang" "$preview")
-    if [[ "$status" == "error" ]]; then
-        notify "done" "$body
-(Streamer stopped early, so the end of the take may be missing.)" low 12000
-    else
-        notify "done" "$body" low 12000
-    fi
     rm -f "$wav"
     exit 0
 fi
@@ -262,7 +266,6 @@ if (( size < 20000 )) || awk "BEGIN{exit !(${dur:-0} < 0.6)}"; then
 fi
 
 log "stop: transcribing (${dur}s of audio)"
-notify "Transcribing ${dur}s…" "" normal 8000
 
 # Transcribe this take in place. It already has a unique name, so a newer
 # take recording at the same time is unaffected.
@@ -289,11 +292,4 @@ if [[ -z "$text" ]]; then
 fi
 
 log "stop: inserted '$text'"
-
-# Show what was actually heard, so a wrong transcription is obvious at a
-# glance instead of silently sitting in the document.
-preview="$text"
-if (( ${#preview} > 300 )); then preview="${preview:0:297}…"; fi
-body=$(printf 'Typed %ss of speech into your window:\n%s' "${dur%.*}" "$preview")
-notify "done" "$body" low 12000
 exit 0
