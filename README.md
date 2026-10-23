@@ -5,11 +5,15 @@
 <h1 align="center">Sotto</h1>
 
 <p align="center"><b>Offline voice typing for Linux.</b><br>
-One shortcut. Talk. Press it again — the words land in whatever field your cursor is in.</p>
+Press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd>, talk, press it again — the words land in whatever field your cursor is in.</p>
 
 <p align="center">
   <b>Shortcut: <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd></b><br>
   <sub>Press once to start listening; press the same shortcut again to stop and type the rest. There is no separate stop key.</sub>
+</p>
+
+<p align="center">
+  <img src="assets/shortcut.gif" width="760" alt="Ctrl + Alt + Space: press once to start listening, press the same keys again to stop">
 </p>
 
 <p align="center">
