@@ -24,7 +24,7 @@ import subprocess
 import sys
 
 BARS = 7
-TICK_MS = 33          # 30 fps cap
+TICK_MS = 100         # 10 fps: a level meter does not need 30
 HEIGHT = 26           # height of the bar canvas
 BAR_W = 4
 GAP = 3
@@ -158,6 +158,7 @@ class Indicator:
         self.dot = Gtk.Box()
         self.dot.add_css_class("dot")
         self.dot.set_size_request(8, 8)
+        self.dot.set_opacity(0.85)
         self.dot.set_valign(Gtk.Align.CENTER)
         box.append(self.dot)
 
@@ -202,16 +203,15 @@ class Indicator:
         t = now - self.started
 
         # Fast attack, slow decay: speech should snap, quiet should settle.
+        before = self.current
         target = read_level(self.wav) if self.wav else 0.0
         tau = 0.04 if target > self.current else 0.25
         self.current += (target - self.current) * (1 - math.exp(-(TICK_MS / 1000) / tau))
         self.levels = self.levels[1:] + [self.current]
+        changed = abs(self.current - before) > 0.002
 
-        # Dot: opacity only, ~1.2 s per breath, no scaling.
-        if self.muted:
-            self.dot.set_opacity(1.0)
-        else:
-            self.dot.set_opacity(0.55 + 0.45 * (0.5 + 0.5 * math.cos(2 * math.pi * t / 1.2)))
+        # Dot: fixed brightness. Per-frame opacity forced a full redraw; the
+        # bars carry the live state and the muted class changes the color.
 
         # Text teaches once, then the strip stays compact for the rest of the take:
         # the dot and the live bars are the state, the word was only the intro.
@@ -226,7 +226,8 @@ class Indicator:
         elif self.label.get_visible():
             self.label.set_visible(False)
 
-        self.area.queue_draw()
+        if changed:
+            self.area.queue_draw()
         return True
 
     def poll_mute(self) -> bool:
@@ -237,6 +238,7 @@ class Indicator:
                 self.dot.add_css_class("muted")
             else:
                 self.dot.remove_css_class("muted")
+            self.area.queue_draw()
         return True
 
     # -- lifecycle -------------------------------------------------------
@@ -288,9 +290,12 @@ class Indicator:
             return False
         try:
             surface.set_input_region(cairo.Region())
-            return True
         except Exception:
             return False
+        # GLib.idle_add repeats while the callback returns True. This only
+        # needs to run once; returning True here spun the main loop forever
+        # and burned a full CPU core for the entire dictation.
+        return False
 
     def run(self) -> None:
         self.place()
@@ -299,7 +304,7 @@ class Indicator:
         GLib.idle_add(self.make_click_through)
         self.fade(0.0, 1.0, 150)            # enter: 150 ms fade
         GLib.timeout_add(TICK_MS, self.tick)
-        GLib.timeout_add(1500, self.poll_mute)
+        GLib.timeout_add(5000, self.poll_mute)
         if self.pid:
             GLib.timeout_add(400, self.watch_pid)
         GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self.on_signal)
