@@ -48,7 +48,7 @@ def ensure_server(timeout: float = 90.0) -> bool:
     return os.path.exists(SOCK)
 
 
-def ask_server(path, *, language=None, prompt=None, beam_size=None):
+def ask_server(path, *, language=None, prompt=None, beam_size=None, words=False):
     """Ask the model server to transcribe `path`.
 
     Returns the server's dict, or None if the server couldn't be reached.
@@ -63,6 +63,8 @@ def ask_server(path, *, language=None, prompt=None, beam_size=None):
         req["prompt"] = prompt
     if beam_size:
         req["beam_size"] = beam_size
+    if words:
+        req["words"] = True
     payload = (path + "\n") if set(req) == {"path"} else (json.dumps(req) + "\n")
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

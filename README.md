@@ -79,7 +79,7 @@ Uninstall with `./setup --uninstall`. Your recordings are left alone.
 
 1. Put the cursor where the text should go.
 2. Press `Ctrl+Alt+Space`. A beep, and the listening strip appears.
-3. Talk. Words start appearing after about four seconds.
+3. Talk. Words start appearing after about five seconds.
 4. Press `Ctrl+Alt+Space` again. Second beep, the strip leaves, the rest lands.
 
 It streams: each ~3 second slice is transcribed and typed while the next one
@@ -101,10 +101,12 @@ turn the strip off.
 
 ## Languages
 
-Nothing is pinned by default — Whisper detects the language per take, so you
-can switch between English and Urdu mid-sentence and it keeps up.
+Sotto detects the language from your first words and keeps it for that take.
+Re-checking every short slice made the language flip mid-sentence (German in
+one real take) and produced garbage, so it does not re-detect until the next
+take.
 
-To pin one:
+To pick the language yourself:
 
 ```bash
 export SOTTO_LANGUAGE=ur    # en, hi, ar, es, tr, ... 90+
@@ -125,10 +127,16 @@ Default is `small`: the best balance on a CPU-only machine.
 
 ## Speed, honestly
 
-On a 4-core i5-8350U: the first words appear after about four seconds — a 2
-second first slice, then ~2 seconds to decode it. After that a fresh slice
-lands every ~3 seconds, decoded while you keep talking, so it keeps up. When
-you stop, the last words land about two seconds later.
+On a 4-core i5-8350U: the first words appear after about five seconds — a 2
+second first slice, then ~3 seconds to decode it (word timestamps included).
+After that a fresh slice lands every ~3 seconds, decoded while you keep
+talking. When you stop, the last words land about three seconds later.
+
+Each slice commits only the words that end before the next slice's overlap;
+the next slice re-reads the boundary with the right context. That is why a
+misheard word at an edge cannot be typed twice or leak into the rest of the
+take. If the machine is busy and a slice runs long, Sotto transcribes one
+larger slice to catch up instead of letting the lag grow for the whole take.
 
 The model stays loaded for 30 idle minutes. The first sentence after that pays
 a few seconds of model load; everything after is back to the times above.
@@ -169,7 +177,7 @@ entry, or bind it by hand in System Settings → Keyboard → Shortcuts.
 |---|---|
 | `dictate` | the toggle the hotkey runs: start → stop → transcribe → type |
 | `indicator.py` | the little listening strip (Wayland layer-shell, real mic level) |
-| `streamer.py` | live slicing: first slice at 2 s, then every ~3 s, types as it goes |
+| `streamer.py` | live slicing: first slice at 2 s, then every ~3 s, commits only confirmed words |
 | `model_server.py` | keeps the transcriber and a tiny language detector resident; exits after 30 min idle |
 | `transcribe.py` | one-shot path, also the fallback when streaming fails |
 | `vdlib.py` | shared helpers: server socket, text insertion, history |

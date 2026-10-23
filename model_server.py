@@ -75,7 +75,7 @@ def decode(path: str) -> np.ndarray:
             pass
 
 
-def transcribe(path: str, language=None, prompt=None, beam_size: int = 5, vad: bool = True) -> dict:
+def transcribe(path: str, language=None, prompt=None, beam_size: int = 5, vad: bool = True, words: bool = False) -> dict:
     audio = decode(path)
     if audio.size < 1600:
         return {"status": "no_speech", "text": ""}
@@ -86,25 +86,44 @@ def transcribe(path: str, language=None, prompt=None, beam_size: int = 5, vad: b
             language, detected_prob, _ = detector.detect_language(audio=audio)
         except Exception:  # noqa: BLE001
             language = None
+    # Hard bounds on the decoder. Whisper's default temperature list retries a
+    # bad slice at 0.2 ... 1.0 with up to 448 tokens each; one noisy or silent
+    # slice could therefore block the single server for 10-35 s while every
+    # later slice queued behind it. Greedy, one temperature, token cap.
+    duration = audio.size / 16000.0
+    max_tokens = max(24, min(192, int(duration * 8) + 16))
     segments, info = model.transcribe(
         audio,
         beam_size=beam_size,
+        best_of=1,
+        temperature=0.0,
+        max_new_tokens=max_tokens,
+        no_repeat_ngram_size=3,
         vad_filter=vad,
         vad_parameters={"min_silence_duration_ms": 400},
         language=language,  # None = let the tiny detector (or whisper) decide
         condition_on_previous_text=False,
-        without_timestamps=True,
-        initial_prompt=prompt,  # keeps casing/wording continuous across live slices
+        without_timestamps=not words,
+        word_timestamps=words,
+        initial_prompt=prompt,
     )
+    segments = list(segments)
     text = " ".join(s.text.strip() for s in segments if s.text.strip()).strip()
     prob = detected_prob if detected_prob is not None else info.language_probability
-    return {
+    result = {
         "status": "ok" if text else "no_speech",
         "text": text,
         "lang": language or info.language,
         "prob": round(prob or 0.0, 2),
         "seconds": round(time.time() - t0, 1),
     }
+    if words:
+        result["words"] = [
+            {"start": round(w.start, 2), "end": round(w.end, 2), "word": w.word}
+            for seg in segments
+            for w in (seg.words or [])
+        ]
+    return result
 
 
 def idle_watchdog():
@@ -139,7 +158,7 @@ def handle(conn):
                 f.flush()
                 return
             path = req.get("path", "")
-            opts = {k: req[k] for k in ("language", "prompt", "beam_size", "vad") if k in req}
+            opts = {k: req[k] for k in ("language", "prompt", "beam_size", "vad", "words") if k in req}
         try:
             result = transcribe(path, **opts)
         except Exception as e:  # noqa: BLE001

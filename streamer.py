@@ -9,10 +9,12 @@ When you press the hotkey again, `dictate` sends SIGTERM: we transcribe the
 remaining tail, stitch it to what was already typed, write the state file and
 exit. `dictate` then just cleans up.
 
-Stitching: each slice re-covers a short overlap of the previous one and the
-repeated words are dropped, so nothing is typed twice. The text you saw live
-is what stays in the document - there is deliberately no full re-transcription
-at the end, which would type everything a second time.
+Stitching: each slice re-covers a short overlap of the previous one. Only the
+words that end before the next slice's start are typed now; the next slice
+re-reads the boundary with the right context and types the rest, so nothing is
+typed twice and a bad guess at an edge cannot leak into the take. The text you
+saw live is what stays in the document - there is deliberately no full
+re-transcription at the end, which would type everything a second time.
 
 If this process cannot start the model server it exits with code 2 and
 `dictate` falls back to transcribing the whole take after you stop.
@@ -43,7 +45,8 @@ LAST_TAKE = os.path.join(STATE, "last_take.txt")
 CHUNK = float(os.environ.get("VD_CHUNK", "3.0"))  # seconds of new audio per emission
 FIRST_CHUNK = float(os.environ.get("VD_FIRST_CHUNK", "2.0"))  # first words out sooner
 OVERLAP = 1.2  # seconds re-covered before the boundary, used to dedupe words
-PROMPT_CHARS = 200  # tail of the text fed back as context for the next slice
+WORD_MARGIN = 0.4  # type words ending this far before the next slice starts
+MAX_MERGE = 10.0  # seconds; one larger slice when the stream has fallen behind
 
 stop_requested = False
 typed = ""
@@ -141,8 +144,13 @@ def overlap_trim(prev: str, new: str) -> str:
     return new
 
 
-def emit(start: float, end: float) -> bool:
+def emit(start: float, end: float, final: bool = False) -> bool:
     """Transcribe audio [start-OVERLAP, end] and type the new words.
+
+    Before the final tail, only words that end before the next slice's start
+    are typed. The next slice re-covers the last OVERLAP seconds, so deferring
+    this boundary means the same audio is never typed twice with two different
+    guesses - which is what produced the drifted text in longer takes.
 
     Returns False on a server problem (caller retries), True when the slice
     was consumed - including the 'silence, nothing to say' case.
@@ -158,26 +166,41 @@ def emit(start: float, end: float) -> bool:
         log(f"ffmpeg slice failed for {s:.1f}..{end:.1f}")
         return False
     try:
-        # No language pin: the server's tiny detector labels every slice, so a
-        # switch between English and Urdu is picked up as it happens.
-        # SOTTO_LANGUAGE still pins one language (vdlib injects it).
-        res = ask_server(chunk, prompt=(typed[-PROMPT_CHARS:] or None), beam_size=1)
+        # Pin the language after the first confident slice: re-detecting with
+        # the tiny model on every short slice sometimes flipped a slice to the
+        # wrong language (German in one real take) and produced garbage.
+        # SOTTO_LANGUAGE still pins one language from the start.
+        res = ask_server(chunk, language=lang, beam_size=1, words=True)
     finally:
         try:
             os.unlink(chunk)
         except OSError:
             pass
 
-    if res is None or res.get("status") == "error":
+    if res is None:
+        # A dead/stuck server must not poison every later slice: make sure a
+        # fresh one is up before the caller retries this slice.
+        ensure_server(timeout=30)
+        log(f"slice {s:.1f}..{end:.1f} failed: server unreachable")
+        return False
+    if res.get("status") == "error":
         log(f"slice {s:.1f}..{end:.1f} failed: {res}")
         return False
     if res.get("status") == "no_speech":
         return True  # silence - advance, nothing to type
 
     text = (res.get("text") or "").strip()
+    words = res.get("words") or []
+    if words and start > 0.0 and not final:
+        # The next slice starts (dur - OVERLAP) seconds into this chunk. Keep
+        # the words that end safely before it; it will transcribe the rest
+        # with the right context and type them once.
+        cutoff = dur - OVERLAP + WORD_MARGIN
+        kept = [w for w in words if float(w.get("end") or 0) <= cutoff]
+        text = "".join(str(w.get("word") or "") for w in kept).strip()
     if not text:
         return True
-    if res.get("lang") and float(res.get("prob") or 0) >= 0.5:
+    if lang is None and res.get("lang") and float(res.get("prob") or 0) >= 0.5:
         lang = res.get("lang")
 
     text = overlap_trim(typed, text)
@@ -219,11 +242,19 @@ def main() -> int:
     while not stop_requested and recorder_alive():
         dur = probe_duration(WAV)
         step = FIRST_CHUNK if offset == 0.0 else CHUNK
-        if dur - offset >= step:
-            log(f"emit slice offset={offset:.1f} end={offset+step:.1f} dur={dur:.1f}")
-            if emit(offset, offset + step):
+        backlog = dur - offset
+        if backlog >= step:
+            end = offset + step
+            if backlog > CHUNK * 2:
+                # It fell behind (slow decode, busy machine): transcribe one
+                # larger slice instead of a queue of 3 s slices, so the lag
+                # does not keep growing for the rest of the take.
+                end = min(dur, offset + MAX_MERGE)
+                log(f"catch up: {backlog:.1f}s behind, one {end-offset:.1f}s slice")
+            log(f"emit slice offset={offset:.1f} end={end:.1f} dur={dur:.1f}")
+            if emit(offset, end):
                 failures = 0
-                offset += step
+                offset = end
             else:
                 failures += 1
                 if failures >= 6:
@@ -234,13 +265,17 @@ def main() -> int:
         else:
             time.sleep(0.35)
 
-    # Recording ended: finish whatever speech came after the last slice.
+    # Recording ended: finish whatever speech came after the last slice. Cap
+    # each tail request so a long backlog cannot become one huge decode.
     if failures < 6:
         dur = probe_duration(WAV)
-        if dur - offset > 0.4 or (offset == 0.0 and dur >= 0.5):
-            if not emit(offset, dur):
+        while dur - offset > 0.4 or (offset == 0.0 and dur >= 0.5):
+            end = min(dur, offset + MAX_MERGE)
+            final = end >= dur - 0.05
+            if not emit(offset, end, final=final):
                 save_state("error")
                 return 3
+            offset = end
 
     save_state("done")
     log(f"done: {state['chunks']} slices, {len(typed.split())} words")
