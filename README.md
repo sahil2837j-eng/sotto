@@ -82,7 +82,7 @@ Uninstall with `./setup --uninstall`. Your recordings are left alone.
 3. Talk. Words start appearing after about four seconds.
 4. Press `Ctrl+Alt+Space` again. Second beep, the strip leaves, the rest lands.
 
-It streams: each ~4 second slice is transcribed and typed while the next one
+It streams: each ~3 second slice is transcribed and typed while the next one
 is still being recorded. You are not waiting for the whole take.
 
 ## While you talk
@@ -125,10 +125,16 @@ Default is `small`: the best balance on a CPU-only machine.
 
 ## Speed, honestly
 
-On a 4-core i5-8350U: a 10 second sentence takes about 15 seconds to appear, a
-30 second one about 45. The streaming design hides most of that — you see text
-while you keep talking. The first use after five idle minutes pays a ~7 second
-model load.
+On a 4-core i5-8350U: the first words appear after about four seconds — a 2
+second first slice, then ~2 seconds to decode it. After that a fresh slice
+lands every ~3 seconds, decoded while you keep talking, so it keeps up. When
+you stop, the last words land about two seconds later.
+
+The model stays loaded for 30 idle minutes. The first sentence after that pays
+a few seconds of model load; everything after is back to the times above.
+
+Short takes and the fallback path still transcribe the whole file at once: a
+10 second sentence takes ~15 seconds there. Streaming is what hides that.
 
 ## Troubleshooting
 
@@ -163,8 +169,8 @@ entry, or bind it by hand in System Settings → Keyboard → Shortcuts.
 |---|---|
 | `dictate` | the toggle the hotkey runs: start → stop → transcribe → type |
 | `indicator.py` | the little listening strip (Wayland layer-shell, real mic level) |
-| `streamer.py` | live slicing: transcribes growing audio every ~4 s and types it |
-| `model_server.py` | keeps the model resident, exits after 5 min idle to free RAM |
+| `streamer.py` | live slicing: first slice at 2 s, then every ~3 s, types as it goes |
+| `model_server.py` | keeps the transcriber and a tiny language detector resident; exits after 30 min idle |
 | `transcribe.py` | one-shot path, also the fallback when streaming fails |
 | `vdlib.py` | shared helpers: server socket, text insertion, history |
 | `setup` | the installer above |

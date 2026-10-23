@@ -2,11 +2,10 @@
 # Voice dictation toggle: press once to start listening, again to stop.
 #
 # While you are speaking, streamer.py transcribes the growing recording in
-# ~4 s slices and types each slice into the focused window, so text appears
-# live. Pressing the hotkey again finishes the tail and shows a summary of
-# what was typed. Takes that are too short for a live slice - and any run
-# where streaming failed - fall back to transcribing the whole take after the
-# fact (the original behaviour).
+# ~3 s slices and types each slice into the focused window, so text appears
+# live. Pressing the hotkey again finishes the tail. Takes that are too short
+# for a live slice - and any run where streaming failed - fall back to
+# transcribing the whole take after the fact.
 #
 # Every take gets its own wav under state/takes/, and the recorder's pid file
 # records which wav belongs to it. That way starting a new take while the

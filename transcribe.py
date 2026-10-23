@@ -8,8 +8,8 @@ the clipboard alone. Anything with non-ASCII characters (e.g. Urdu) is put on
 the clipboard and pasted with Ctrl+V, because ydotool can only emit keycodes.
 
 Transcription normally goes through model_server.py, which keeps the model
-loaded (first use pays the ~7 s load, later uses do not). If the server can't
-be started we fall back to loading the model in this process.
+loaded (first use pays a few seconds of load, later uses do not). If the server
+can't be started we fall back to loading the model in this process.
 
 Server/insertion/history helpers live in vdlib.py, shared with streamer.py.
 """

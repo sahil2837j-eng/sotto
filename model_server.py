@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Keeps the whisper model loaded so dictation results arrive in seconds
-instead of paying ~7 s of model load on every utterance.
+instead of paying a few seconds of model load on every utterance.
 
 Started on demand by transcribe.py, talks over a unix socket, one request per
 connection: send a wav path + newline, get one JSON line back. Shuts itself
@@ -28,19 +28,31 @@ from faster_whisper import WhisperModel  # noqa: E402
 BASE = os.path.dirname(os.path.abspath(__file__))
 SOCK = os.path.join(BASE, "state", "model.sock")
 PIDFILE = os.path.join(BASE, "state", "model.pid")
-IDLE_TIMEOUT = 300  # seconds
+IDLE_TIMEOUT = 1800  # seconds; warm through a work session, then give RAM back
 
 model = None
+detector = None
 last_used = time.time()
 busy = threading.Event()
 
 
 def load_model():
-    global model
+    global model, detector
     t0 = time.time()
     # 4 threads match the physical cores; 8 (SMT) measured no faster and
     # contends with whatever else is running.
     model = WhisperModel(os.environ.get("SOTTO_MODEL", "small"), device="cpu", compute_type="int8", cpu_threads=4)
+    # Detecting the language with the small model is a full extra encoder pass
+    # (~1.6 s here), which doubles the wait for the first words. Tiny does the
+    # same job in ~0.3 s, so every slice can detect its own language instead of
+    # pinning the whole take to whatever the first slice guessed.
+    det_name = os.environ.get("SOTTO_DETECT_MODEL", "tiny").strip()
+    if det_name and det_name.lower() != "none":
+        try:
+            detector = WhisperModel(det_name, device="cpu", compute_type="int8", cpu_threads=2)
+        except Exception as e:  # noqa: BLE001
+            detector = None
+            print(f"language detector unavailable ({e}); using full detection", flush=True)
     print(f"model ready in {time.time() - t0:.1f}s", flush=True)
 
 
@@ -68,22 +80,29 @@ def transcribe(path: str, language=None, prompt=None, beam_size: int = 5, vad: b
     if audio.size < 1600:
         return {"status": "no_speech", "text": ""}
     t0 = time.time()
+    detected_prob = None
+    if language is None and detector is not None:
+        try:
+            language, detected_prob, _ = detector.detect_language(audio=audio)
+        except Exception:  # noqa: BLE001
+            language = None
     segments, info = model.transcribe(
         audio,
         beam_size=beam_size,
         vad_filter=vad,
         vad_parameters={"min_silence_duration_ms": 400},
-        language=language,  # None = auto-detect English / Urdu / mixed
+        language=language,  # None = let the tiny detector (or whisper) decide
         condition_on_previous_text=False,
         without_timestamps=True,
         initial_prompt=prompt,  # keeps casing/wording continuous across live slices
     )
     text = " ".join(s.text.strip() for s in segments if s.text.strip()).strip()
+    prob = detected_prob if detected_prob is not None else info.language_probability
     return {
         "status": "ok" if text else "no_speech",
         "text": text,
-        "lang": info.language,
-        "prob": round(info.language_probability, 2),
+        "lang": language or info.language,
+        "prob": round(prob or 0.0, 2),
         "seconds": round(time.time() - t0, 1),
     }
 

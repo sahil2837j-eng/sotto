@@ -2,12 +2,12 @@
 """Live streaming transcription for sotto.
 
 Started by `dictate` when recording begins. It watches the growing recording,
-transcribes it in ~4 s slices and types each slice into the focused window as
+transcribes it in ~3 s slices and types each slice into the focused window as
 soon as it is decoded - so words appear while you are still speaking.
 
 When you press the hotkey again, `dictate` sends SIGTERM: we transcribe the
 remaining tail, stitch it to what was already typed, write the state file and
-exit. `dictate` then only posts a summary notification.
+exit. `dictate` then just cleans up.
 
 Stitching: each slice re-covers a short overlap of the previous one and the
 repeated words are dropped, so nothing is typed twice. The text you saw live
@@ -40,8 +40,9 @@ STREAM_PID = os.path.join(STATE, "stream.pid")
 STREAM_STATE = os.path.join(STATE, "stream.json")
 LAST_TAKE = os.path.join(STATE, "last_take.txt")
 
-CHUNK = float(os.environ.get("VD_CHUNK", "4.0"))  # seconds of new audio per emission
-OVERLAP = 1.5  # seconds re-covered before the boundary, used to dedupe words
+CHUNK = float(os.environ.get("VD_CHUNK", "3.0"))  # seconds of new audio per emission
+FIRST_CHUNK = float(os.environ.get("VD_FIRST_CHUNK", "2.0"))  # first words out sooner
+OVERLAP = 1.2  # seconds re-covered before the boundary, used to dedupe words
 PROMPT_CHARS = 200  # tail of the text fed back as context for the next slice
 
 stop_requested = False
@@ -157,7 +158,10 @@ def emit(start: float, end: float) -> bool:
         log(f"ffmpeg slice failed for {s:.1f}..{end:.1f}")
         return False
     try:
-        res = ask_server(chunk, language=lang, prompt=(typed[-PROMPT_CHARS:] or None))
+        # No language pin: the server's tiny detector labels every slice, so a
+        # switch between English and Urdu is picked up as it happens.
+        # SOTTO_LANGUAGE still pins one language (vdlib injects it).
+        res = ask_server(chunk, prompt=(typed[-PROMPT_CHARS:] or None), beam_size=1)
     finally:
         try:
             os.unlink(chunk)
@@ -173,7 +177,7 @@ def emit(start: float, end: float) -> bool:
     text = (res.get("text") or "").strip()
     if not text:
         return True
-    if lang is None and float(res.get("prob") or 0) >= 0.5:
+    if res.get("lang") and float(res.get("prob") or 0) >= 0.5:
         lang = res.get("lang")
 
     text = overlap_trim(typed, text)
@@ -214,11 +218,12 @@ def main() -> int:
 
     while not stop_requested and recorder_alive():
         dur = probe_duration(WAV)
-        if dur - offset >= CHUNK:
-            log(f"emit slice offset={offset:.1f} end={offset+CHUNK:.1f} dur={dur:.1f}")
-            if emit(offset, offset + CHUNK):
+        step = FIRST_CHUNK if offset == 0.0 else CHUNK
+        if dur - offset >= step:
+            log(f"emit slice offset={offset:.1f} end={offset+step:.1f} dur={dur:.1f}")
+            if emit(offset, offset + step):
                 failures = 0
-                offset += CHUNK
+                offset += step
             else:
                 failures += 1
                 if failures >= 6:
