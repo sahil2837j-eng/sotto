@@ -78,12 +78,26 @@ Uninstall with `./setup --uninstall`. Your recordings are left alone.
 ## Use
 
 1. Put the cursor where the text should go.
-2. Press `Ctrl+Alt+Space`. A beep. "Listening…".
+2. Press `Ctrl+Alt+Space`. A beep, and the listening strip appears.
 3. Talk. Words start appearing after about four seconds.
-4. Press `Ctrl+Alt+Space` again. Second beep. The rest lands.
+4. Press `Ctrl+Alt+Space` again. Second beep, the strip leaves, the rest lands.
 
 It streams: each ~4 second slice is transcribed and typed while the next one
 is still being recorded. You are not waiting for the whole take.
+
+## While you talk
+
+A small strip sits at the bottom of the screen for as long as the microphone
+is open: the Sotto mark, a red dot, and seven bars of your real input level.
+It stays above other windows, never takes focus, and clicks pass through it.
+
+Flat bars mean silence. If the default microphone is muted, a slash crosses
+them, so a muted mic is not mistaken for a quiet one.
+
+The strip needs Wayland plus GTK4 and `gtk4-layer-shell` (on Arch:
+`sudo pacman -S gtk4-layer-shell python-gobject`). Without them Sotto still
+works — the desktop notification is the fallback. Set `SOTTO_INDICATOR=0` to
+turn the strip off.
 
 ## Languages
 
@@ -144,6 +158,7 @@ entry, or bind it by hand in System Settings → Keyboard → Shortcuts.
 | Path | Purpose |
 |---|---|
 | `dictate` | the toggle the hotkey runs: start → stop → transcribe → type |
+| `indicator.py` | the little listening strip (Wayland layer-shell, real mic level) |
 | `streamer.py` | live slicing: transcribes growing audio every ~4 s and types it |
 | `model_server.py` | keeps the model resident, exits after 5 min idle to free RAM |
 | `transcribe.py` | one-shot path, also the fallback when streaming fails |

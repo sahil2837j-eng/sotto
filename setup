@@ -131,6 +131,19 @@ check wl-copy wl-clipboard
 check pw-play pipewire
 check notify-send libnotify
 
+# The listening strip is optional. Without layer-shell it simply stays hidden.
+if python3 - <<'PY' >/dev/null 2>&1
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gtk4LayerShell", "1.0")
+from gi.repository import Gtk4LayerShell  # noqa: F401
+PY
+then
+    ok "listening strip (GTK4 layer-shell)"
+else
+    warn "no gtk4-layer-shell — the listening strip will stay hidden (notifications still work)"
+fi
+
 if [ "${#need_pkgs[@]}" -gt 0 ]; then
     # keep one copy of each name, in first-seen order
     uniq_pkgs=()
@@ -161,7 +174,7 @@ fi
 # ---------- 2. files ----------
 head2 "2/6  installing to $DEST"
 mkdir -p "$DEST" "$DEST/sounds" "$DEST/assets" "$APPS"
-cp "$SRC"/dictate "$SRC"/streamer.py "$SRC"/model_server.py "$SRC"/transcribe.py "$SRC"/vdlib.py "$DEST"/
+cp "$SRC"/dictate "$SRC"/indicator.py "$SRC"/streamer.py "$SRC"/model_server.py "$SRC"/transcribe.py "$SRC"/vdlib.py "$DEST"/
 cp "$SRC"/sounds/*.wav "$DEST/sounds"/
 cp "$SRC"/assets/icon.svg "$SRC"/assets/icon-256.png "$DEST/assets/" 2>/dev/null || true
 chmod +x "$DEST/dictate"

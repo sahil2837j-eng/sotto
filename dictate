@@ -22,6 +22,8 @@ STREAM_PID="$STATE/stream.pid"
 STREAM_STATE="$STATE/stream.json"
 LAST_TAKE="$STATE/last_take.txt"
 BOOST_FILE="$STATE/power_boost"
+INDICATOR="$BASE/indicator.py"
+INDICATOR_PID="$STATE/indicator.pid"
 LOG="$BASE/dictate.log"
 PY="$BASE/.venv/bin/python"
 MAX_SECONDS=300
@@ -32,6 +34,43 @@ mkdir -p "$STATE" "$TAKES"
 log()  { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
 notify() { notify-send -u "${3:-normal}" -t "${4:-6000}" "Voice dictation" "${2:-$1}" 2>/dev/null || true; }
 sound() { pw-play "$BASE/sounds/$1.wav" >/dev/null 2>&1 & }
+
+# ---------- listening strip ----------
+# Best effort: no layer-shell or no GTK, no strip. Dictation never depends on it.
+layer_shell_lib() {
+    local p
+    for p in /usr/lib/libgtk4-layer-shell.so.0 \
+             /usr/lib/*/libgtk4-layer-shell.so.0 \
+             /usr/lib64/libgtk4-layer-shell.so.0; do
+        [[ -e "$p" ]] && { printf '%s' "$p"; return 0; }
+    done
+    ldconfig -p 2>/dev/null | awk '/libgtk4-layer-shell\.so\.0/ {print $NF; exit}'
+}
+
+start_indicator() {
+    [[ "${SOTTO_INDICATOR:-1}" == "0" ]] && return 0
+    [[ -f "$INDICATOR" ]] || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
+    stop_indicator
+    # Python's GTK pulls in libwayland first; preloading the layer-shell
+    # library is the documented fix for gtk_layer_init_for_window failing.
+    local lib
+    lib=$(layer_shell_lib)
+    if [[ -n "$lib" ]]; then
+        LD_PRELOAD="$lib" python3 "$INDICATOR" --pid "$1" --wav "$2" >/dev/null 2>&1 &
+    else
+        python3 "$INDICATOR" --pid "$1" --wav "$2" >/dev/null 2>&1 &
+    fi
+    echo $! > "$INDICATOR_PID"
+}
+
+stop_indicator() {
+    [[ -f "$INDICATOR_PID" ]] || return 0
+    local ipid
+    ipid=$(cat "$INDICATOR_PID" 2>/dev/null)
+    [[ -n "$ipid" ]] && kill -TERM "$ipid" 2>/dev/null
+    rm -f "$INDICATOR_PID"
+}
 
 pid_alive() { kill -0 "$1" 2>/dev/null; }
 
@@ -164,6 +203,7 @@ if ! pid=$(recording_pid); then
     fi
 
     log "start: recording pid=$pid streamer=$spid wav=$wav"
+    start_indicator "$pid" "$wav"
     sound start
     notify "Listening — words appear as you speak. Press $HOTKEY to stop." "Listening" low 8000
     exit 0
@@ -174,6 +214,7 @@ fi
 # while we finish will use a different file, so nothing here can touch it.
 wav=$(recording_wav || printf '%s' "$STATE/recording.wav")
 sound stop
+stop_indicator
 stop_recording "$pid"
 rm -f "$PIDF"
 notify "Finishing the last words…" "" low 4000
