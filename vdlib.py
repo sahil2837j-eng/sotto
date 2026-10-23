@@ -24,10 +24,28 @@ def run(cmd, **kw):
     return subprocess.run(cmd, check=False, capture_output=True, **kw)
 
 
-def ensure_server(timeout: float = 90.0) -> bool:
-    """Start the model server on demand if its socket isn't there."""
-    if os.path.exists(SOCK):
+def _server_alive() -> bool:
+    """A socket file can survive a killed server; a connect is the real test."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(0.2)
+        s.connect(SOCK)
         return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def ensure_server(timeout: float = 90.0) -> bool:
+    """Start the model server on demand if it isn't accepting connections."""
+    if os.path.exists(SOCK):
+        if _server_alive():
+            return True
+        try:
+            os.unlink(SOCK)  # stale socket left by a killed/OOM-ed server
+        except OSError:
+            pass
     try:
         os.makedirs(STATE, exist_ok=True)
         with open(SERVER_LOG, "a") as logfh:
