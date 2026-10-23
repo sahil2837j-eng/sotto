@@ -46,11 +46,14 @@ CHUNK = float(os.environ.get("VD_CHUNK", "3.0"))  # seconds of new audio per emi
 FIRST_CHUNK = float(os.environ.get("VD_FIRST_CHUNK", "2.0"))  # first words out sooner
 OVERLAP = 1.2  # seconds re-covered before the boundary, used to dedupe words
 WORD_MARGIN = 0.4  # type words ending this far before the next slice starts
+WORD_EPS = 0.10  # timestamp slop: a word starting this close to typed_until is a repeat
 MAX_MERGE = 10.0  # seconds; one larger slice when the stream has fallen behind
 
 stop_requested = False
 typed = ""
+typed_until = 0.0
 lang = None
+pending = None  # first word deferred at the last slice boundary: {"word","start","end"}
 offset = 0.0
 state = {"status": "recording", "lang": None, "chunks": 0, "words": 0}
 
@@ -131,6 +134,51 @@ def _toks(s: str):
     return out
 
 
+def _norm_word(s: str) -> str:
+    return s.strip(" ,.!?;:\"'()…-").lower()
+
+
+def _same_word(a: str, b: str) -> bool:
+    """Loose comparison for a word re-heard across a slice boundary."""
+    a, b = _norm_word(a), _norm_word(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if min(len(a), len(b)) >= 4 and (a.startswith(b) or b.startswith(a)):
+        return True
+    return False
+
+
+def _align_start(words, s: float, pending) -> int:
+    """Index of the word the previous slice deferred, or -1 if not found.
+
+    Time proximity matters: a legitimate repeat ("no, no") has two identical
+    words, and the first one is usually already in the document. Pick the
+    occurrence closest to the deferred word's timestamp.
+    """
+    if not pending:
+        return -1
+    want = str(pending.get("word") or "")
+    try:
+        want_at = float(pending.get("start") or 0.0)
+    except (TypeError, ValueError):
+        want_at = 0.0
+    best_i = -1
+    best_dt = 1.01
+    for i, w in enumerate(words):
+        try:
+            a = s + float(w.get("start") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if not _same_word(str(w.get("word") or ""), want):
+            continue
+        dt = abs(a - want_at)
+        if dt <= 1.0 and dt < best_dt:
+            best_i, best_dt = i, dt
+    return best_i
+
+
 def overlap_trim(prev: str, new: str) -> str:
     """Drop words at the start of `new` that repeat the end of `prev`."""
     if not prev:
@@ -155,7 +203,7 @@ def emit(start: float, end: float, final: bool = False) -> bool:
     Returns False on a server problem (caller retries), True when the slice
     was consumed - including the 'silence, nothing to say' case.
     """
-    global typed, lang
+    global typed, typed_until, lang, pending
     s = max(0.0, start - OVERLAP)
     dur = end - s
     if dur < 0.35:
@@ -187,23 +235,77 @@ def emit(start: float, end: float, final: bool = False) -> bool:
         log(f"slice {s:.1f}..{end:.1f} failed: {res}")
         return False
     if res.get("status") == "no_speech":
+        pending = None  # the deferred boundary was not speech after all
         return True  # silence - advance, nothing to type
 
     text = (res.get("text") or "").strip()
     words = res.get("words") or []
-    if words and start > 0.0 and not final:
-        # The next slice starts (dur - OVERLAP) seconds into this chunk. Keep
-        # the words that end safely before it; it will transcribe the rest
-        # with the right context and type them once.
-        cutoff = dur - OVERLAP + WORD_MARGIN
-        kept = [w for w in words if float(w.get("end") or 0) <= cutoff]
+    new_until = typed_until
+    next_pending = None
+    if words:
+        cutoff = end - OVERLAP + WORD_MARGIN
+
+        # Words in the next slice's overlap are left for that slice, which has
+        # the right context. The previous slice recorded the first deferred
+        # word, so this slice can start there instead of guessing by time.
+
+        # The previous slice deliberately deferred the first word at its
+        # boundary. Find that word again and start there: anything the model
+        # put before it is a re-hearing of audio at or before the boundary,
+        # not new text. This is what produced hallucinated lead-ins
+        # ("I just don't") and duplicates ("artist" / "artists"). If the word
+        # is not found, fall back to the time rule below.
+        aligned = False
+        best_i = _align_start(words, s, pending)
+        if best_i >= 0:
+            if best_i:
+                lead = "".join(str(x.get("word") or "") for x in words[:best_i]).strip()
+                if lead:
+                    log(f"skip lead-in: {lead!r}")
+            words = words[best_i:]
+            aligned = True
+
+        kept = []
+        for w in words:
+            try:
+                a = s + float(w.get("start") or 0.0)
+                b = min(end, s + float(w.get("end") or 0.0))
+            except (TypeError, ValueError):
+                kept.append(w)
+                continue
+            if not aligned and a < typed_until - WORD_EPS:
+                continue
+            if start > 0.0 and not final and b > cutoff:
+                continue
+            kept.append(w)
+            if b > new_until:
+                new_until = b
         text = "".join(str(w.get("word") or "") for w in kept).strip()
+
+        # Remember the first word this slice had to leave for the next one.
+        if start > 0.0 and not final:
+            for w in words:
+                try:
+                    a = s + float(w.get("start") or 0.0)
+                    b = min(end, s + float(w.get("end") or 0.0))
+                except (TypeError, ValueError):
+                    continue
+                if b > cutoff and a >= typed_until - WORD_EPS:
+                    next_pending = {"word": str(w.get("word") or ""), "start": a, "end": b}
+                    break
+    elif text:
+        # Older server with no timestamps: trust the text and advance to the end.
+        new_until = end
+    pending = next_pending
     if not text:
         return True
     if lang is None and res.get("lang") and float(res.get("prob") or 0) >= 0.5:
         lang = res.get("lang")
 
-    text = overlap_trim(typed, text)
+    # With word times, audio-time commit already guarantees no overlap; a
+    # text match would wrongly drop a legitimate repeated word ("no, no").
+    if not words:
+        text = overlap_trim(typed, text)
     if text:
         # Slices are typed as separate keystroke runs, so a slice that follows
         # another one needs its own leading space or the two run together
@@ -217,6 +319,8 @@ def emit(start: float, end: float, final: bool = False) -> bool:
             # keep going, `dictate` will report it.
             log(f"insert failed: {e}")
         typed = (typed + " " + text).strip()
+        if new_until > typed_until:
+            typed_until = new_until
         append_history(lang or "?", text)
         state["chunks"] += 1
         save_state()
