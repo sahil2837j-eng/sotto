@@ -19,6 +19,7 @@ TAKES="$STATE/takes"
 PIDF="$STATE/recording.pid"     # fields: <recorder pid><TAB><absolute wav path>
 STREAM_PID="$STATE/stream.pid"
 STREAM_STATE="$STATE/stream.json"
+BUSY="$STATE/busy"
 LAST_TAKE="$STATE/last_take.txt"
 BOOST_FILE="$STATE/power_boost"
 INDICATOR="$BASE/indicator.py"
@@ -105,6 +106,19 @@ recording_wav() {
     printf '%s' "$w"
 }
 
+# The streamer belongs to one take. A single global stream.pid is not enough:
+# starting a new take overwrites it, and the previous take's stop would then
+# kill the new streamer (or the old streamer would delete the new pid file).
+# The pidfile therefore carries the streamer as its third field.
+recording_streamer_pid() {
+    [[ -f "$PIDF" ]] || return 1
+    local spid
+    spid=$(cut -f3 "$PIDF" 2>/dev/null)
+    [[ -n "$spid" ]] || return 1
+    pid_alive "$spid" || return 1
+    printf '%s' "$spid"
+}
+
 stream_pid() {
     [[ -f "$STREAM_PID" ]] || return 1
     local pid
@@ -158,21 +172,42 @@ stop_recording() {
     kill -KILL "$pid" 2>/dev/null
 }
 
-# Ask the streamer to finish the last slice and exit, then make sure it is gone.
+# Ask one take's streamer to finish the last slice and exit. Callers pass the
+# pid they read from that take's pidfile; an explicit empty value must not fall
+# back to the global file, which may belong to a newer take.
 stop_streamer() {
     local spid
-    spid=$(stream_pid) || return 0
+    if [[ $# -gt 0 ]]; then
+        spid="$1"
+    else
+        spid=$(stream_pid) || return 0
+    fi
+    [[ -n "$spid" ]] || return 0
     kill -TERM "$spid" 2>/dev/null
     for _ in $(seq 1 300); do
         pid_alive "$spid" || break
         sleep 0.2
     done
     kill -KILL "$spid" 2>/dev/null
-    rm -f "$STREAM_PID"
+    if [[ "$(cat "$STREAM_PID" 2>/dev/null)" == "$spid" ]]; then
+        rm -f "$STREAM_PID"
+    fi
 }
 
 # ---------- start ----------
 if ! pid=$(recording_pid); then
+    # A stop can still be waiting for the previous streamer to type its tail.
+    # Refuse a second take until that finishes; otherwise two streamers type
+    # into the same focused window and the words interleave.
+    if [[ -f "$BUSY" ]]; then
+        bpid=$(cat "$BUSY" 2>/dev/null)
+        if [[ -n "$bpid" ]] && pid_alive "$bpid"; then
+            notify "Still finishing the last take — one moment."
+            exit 0
+        fi
+        rm -f "$BUSY"
+    fi
+
     # Take the pidfile out of circulation first so a stop that races us here
     # sees "no take" instead of acting on a wav we are about to replace.
     rm -f "$PIDF"
@@ -209,6 +244,8 @@ if ! pid=$(recording_pid); then
     "$PY" "$BASE/streamer.py" "$wav" >>"$LOG" 2>&1 &
     spid=$!
     echo "$spid" > "$STREAM_PID"
+    # Record the streamer on this take, not just globally.
+    printf '%s\t%s\t%s\n' "$pid" "$wav" "$spid" > "$PIDF"
     sleep 0.5
     if ! pid_alive "$spid"; then
         log "start: streamer did not start - will transcribe the whole take on stop"
@@ -222,14 +259,21 @@ if ! pid=$(recording_pid); then
 fi
 
 # ---------- stop ----------
-# Claim this take's own wav now, before any waiting. A newer take that starts
-# while we finish will use a different file, so nothing here can touch it.
+# Mark the take as finishing so a new hotkey press cannot start a second
+# streamer while this one is typing its tail. The lock records our PID; the
+# next start clears it if this process died before its EXIT trap ran.
+printf '%s\n' "$$" > "$BUSY"
+trap 'rm -f "$BUSY"' EXIT
+
+# Claim this take's own wav and streamer before any waiting. A newer take that
+# starts while we finish will use different files, so nothing here can touch it.
 wav=$(recording_wav || printf '%s' "$STATE/recording.wav")
+spid=$(recording_streamer_pid || true)
 sound stop
 stop_indicator
 stop_recording "$pid"
 rm -f "$PIDF"
-stop_streamer
+stop_streamer "$spid"
 
 # Read what the live pass produced (status/word count/language).
 status=""; words=0; lang="?"

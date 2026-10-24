@@ -397,8 +397,13 @@ if __name__ == "__main__":
         except Exception:  # noqa: BLE001
             pass
         code = 1
+    # Only remove the global pointer if it still names this process. A newer
+    # take may have replaced it while this one was finishing its tail.
     try:
-        os.unlink(STREAM_PID)
+        with open(STREAM_PID, encoding="utf-8") as fh:
+            owner = fh.read().strip()
+        if owner == str(os.getpid()):
+            os.unlink(STREAM_PID)
     except OSError:
         pass
     sys.exit(code)

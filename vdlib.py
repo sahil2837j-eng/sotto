@@ -116,10 +116,28 @@ def insert_text(text: str) -> None:
         if r.returncode != 0:
             raise RuntimeError("ydotool type: " + r.stderr.decode(errors="replace")[:200])
     else:
-        r = run(["wl-copy", "--"], input=text.encode())
+        r = run(
+            ["wl-copy", "--type", "text/plain;charset=utf-8"],
+            input=text.encode(),
+        )
         if r.returncode != 0:
             raise RuntimeError("wl-copy: " + r.stderr.decode(errors="replace")[:200])
-        time.sleep(0.15)
+
+        # A fixed sleep races slow clipboard managers: Ctrl+V then pastes the
+        # previous selection. Wait until the clipboard serves exactly this
+        # text (bounded), so the paste cannot insert stale words. If the
+        # clipboard normalizes the type or wl-paste is unavailable, paste
+        # anyway: dropping the words is worse than a slightly early Ctrl+V.
+        deadline = time.time() + 1.5
+        while time.time() < deadline:
+            try:
+                check = run(["wl-paste", "--no-newline"])
+            except OSError:
+                break
+            if check.returncode == 0 and check.stdout == text.encode():
+                break
+            time.sleep(0.05)
+
         r = run(PASTE_KEYS)
         if r.returncode != 0:
             raise RuntimeError("ydotool key: " + r.stderr.decode(errors="replace")[:200])
