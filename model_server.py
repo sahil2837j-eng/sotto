@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Keeps the whisper model loaded so dictation results arrive in seconds
+"""Keeps the whisper models loaded so dictation results arrive in seconds
 instead of paying a few seconds of model load on every utterance.
 
 Started on demand by transcribe.py, talks over a unix socket, one request per
 connection: send a wav path + newline, get one JSON line back. Shuts itself
 down after IDLE_TIMEOUT seconds with no requests so RAM is given back.
+
+On a cold start the tiny language detector and a small fast model come up
+first; the first slice is transcribed while the main model is still loading.
+That keeps the first words inside the five-second target without keeping the
+large model resident all day.
 """
 import json
 import os
@@ -31,17 +36,20 @@ PIDFILE = os.path.join(BASE, "state", "model.pid")
 IDLE_TIMEOUT = 1800  # seconds; warm through a work session, then give RAM back
 
 model = None
+fast_model = None
 detector = None
 last_used = time.time()
 busy = threading.Event()
 
 
-def load_model():
-    global model, detector
+def load_fast_model():
+    """Load the models that can answer before the main model is warm.
+
+    Tiny detects the language cheaply; a small "fast" model transcribes the
+    first slice so the first words still land within five seconds on a cold
+    start. The main model takes over as soon as it finishes loading."""
+    global detector, fast_model
     t0 = time.time()
-    # 4 threads match the physical cores; 8 (SMT) measured no faster and
-    # contends with whatever else is running.
-    model = WhisperModel(os.environ.get("SOTTO_MODEL", "small"), device="cpu", compute_type="int8", cpu_threads=4)
     # Detecting the language with the small model is a full extra encoder pass
     # (~1.6 s here), which doubles the wait for the first words. Tiny does the
     # same job in ~0.3 s, so every slice can detect its own language instead of
@@ -53,7 +61,36 @@ def load_model():
         except Exception as e:  # noqa: BLE001
             detector = None
             print(f"language detector unavailable ({e}); using full detection", flush=True)
-    print(f"model ready in {time.time() - t0:.1f}s", flush=True)
+    else:
+        detector = None
+
+    # A 2 s first slice with the main model is what used to take nine seconds
+    # on a cold start. Base is quick to load, materially better than tiny on a
+    # short slice, and small enough to keep the first words inside the budget.
+    fast_name = os.environ.get("SOTTO_FAST_MODEL", "base").strip()
+    if fast_name and fast_name.lower() not in ("none", "off"):
+        if detector is not None and fast_name == det_name:
+            fast_model = detector
+        else:
+            try:
+                fast_model = WhisperModel(fast_name, device="cpu", compute_type="int8", cpu_threads=2)
+            except Exception as e:  # noqa: BLE001
+                fast_model = None
+                print(f"fast transcriber unavailable ({e}); using the detector", flush=True)
+    print(f"fast models ready in {time.time() - t0:.1f}s", flush=True)
+
+
+def load_main_model():
+    global model
+    t0 = time.time()
+    # 4 threads match the physical cores; 8 (SMT) measured no faster and
+    # contends with whatever else is running.
+    try:
+        model = WhisperModel(os.environ.get("SOTTO_MODEL", "small"), device="cpu", compute_type="int8", cpu_threads=4)
+    except Exception as e:  # noqa: BLE001
+        print(f"main model unavailable ({e}); staying on the fast model", flush=True)
+        return
+    print(f"main model ready in {time.time() - t0:.1f}s", flush=True)
 
 
 def decode(path: str) -> np.ndarray:
@@ -79,6 +116,9 @@ def transcribe(path: str, language=None, prompt=None, beam_size: int = 5, vad: b
     audio = decode(path)
     if audio.size < 1600:
         return {"status": "no_speech", "text": ""}
+    active = model or fast_model or detector
+    if active is None:
+        return {"status": "error", "text": "", "error": "model still loading"}
     t0 = time.time()
     detected_prob = None
     if language is None and detector is not None:
@@ -92,9 +132,11 @@ def transcribe(path: str, language=None, prompt=None, beam_size: int = 5, vad: b
     # later slice queued behind it. Greedy, one temperature, token cap.
     duration = audio.size / 16000.0
     max_tokens = max(24, min(192, int(duration * 8) + 16))
-    segments, info = model.transcribe(
+    segments, info = active.transcribe(
         audio,
-        beam_size=beam_size,
+        # The fast first-pass model is a bridge until the main model is ready;
+        # keep it greedy so it answers immediately.
+        beam_size=1 if active is not model else beam_size,
         best_of=1,
         temperature=0.0,
         max_new_tokens=max_tokens,
@@ -191,7 +233,15 @@ def main():
         fh.write(str(os.getpid()))
 
     threading.Thread(target=idle_watchdog, daemon=True).start()
-    load_model()
+    load_fast_model()
+    if fast_model is None and detector is None:
+        # No fast models configured: the main model is the only option, so
+        # load it before accepting requests.
+        load_main_model()
+    else:
+        # Accept the first slice immediately; the main model takes over when
+        # it finishes loading in the background.
+        threading.Thread(target=load_main_model, daemon=True).start()
     print(f"listening on {SOCK}", flush=True)
 
     while True:

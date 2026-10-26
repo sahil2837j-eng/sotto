@@ -200,6 +200,7 @@ ok "engine installed"
 
 MODEL="${SOTTO_MODEL:-small}"
 DETECT="${SOTTO_DETECT_MODEL:-tiny}"
+FAST="${SOTTO_FAST_MODEL:-base}"
 case "$MODEL" in
     base)   MODEL_SIZE="145 MB" ;;
     small)  MODEL_SIZE="500 MB" ;;
@@ -207,28 +208,38 @@ case "$MODEL" in
     large*) MODEL_SIZE="3 GB" ;;
     *)      MODEL_SIZE="a few hundred MB" ;;
 esac
+case "$FAST" in
+    tiny)   FAST_SIZE="75 MB" ;;
+    base)   FAST_SIZE="145 MB" ;;
+    small)  FAST_SIZE="500 MB" ;;
+    *)      FAST_SIZE="a few hundred MB" ;;
+esac
 DETECT_SIZE=""
 if [ "$DETECT" != "none" ]; then
     DETECT_SIZE=" + 75 MB detector"
 fi
+FAST_EXTRA=""
+if [ -n "$FAST" ] && [ "$FAST" != "none" ] && [ "$FAST" != "off" ] && [ "$FAST" != "$MODEL" ]; then
+    FAST_EXTRA=" + $FAST_SIZE fast first-slice model"
+fi
 say ""
-say "   The model is what turns sound into words."
-say "   ${B}$MODEL${N} — about $MODEL_SIZE$DETECT_SIZE, downloaded once, then offline forever."
-if ask "download it now? (then your first sentence needs no waiting)"; then
-    if run_spin "downloading the $MODEL model — $MODEL_SIZE$DETECT_SIZE" \
+say "   The models are what turn sound into words."
+say "   ${B}$MODEL${N} — about $MODEL_SIZE$DETECT_SIZE$FAST_EXTRA, downloaded once, then offline forever."
+if ask "download them now? (then your first sentence needs no waiting)"; then
+    if run_spin "downloading the models — $MODEL_SIZE$DETECT_SIZE$FAST_EXTRA" \
         "$DEST/.venv/bin/python" -c 'import sys, time
 from faster_whisper import WhisperModel
 t = time.time()
-WhisperModel(sys.argv[1], device="cpu", compute_type="int8", cpu_threads=4)
-if len(sys.argv) > 2 and sys.argv[2] not in ("", "none"):
-    WhisperModel(sys.argv[2], device="cpu", compute_type="int8", cpu_threads=2)
-print(f"models ready in {time.time() - t:.0f}s")' "$MODEL" "$DETECT"; then
-        ok "model ready"
+for name in sys.argv[1:]:
+    if name and name not in ("none", "off"):
+        WhisperModel(name, device="cpu", compute_type="int8", cpu_threads=4)
+print(f"models ready in {time.time() - t:.0f}s")' "$MODEL" "$DETECT" "$FAST"; then
+        ok "models ready"
     else
         warn "download failed — it will retry on your first dictation"
     fi
 else
-    warn "skipped — it downloads on your first dictation instead"
+    warn "skipped — they download on your first dictation instead"
 fi
 
 # ---------- 4. typing rights ----------

@@ -135,16 +135,20 @@ send physical keycodes. That replaces your clipboard for that utterance.
 ```bash
 export SOTTO_MODEL=base     # faster, less accurate
 export SOTTO_MODEL=medium   # slower, better Urdu (~1.5 GB download)
+export SOTTO_FAST_MODEL=tiny  # smaller download, less first-slice accuracy
+export SOTTO_FAST_MODEL=none  # use only SOTTO_MODEL (slower cold start)
 ```
 
-Default is `small`: the best balance on a CPU-only machine.
+Default is `small` for the main model and `base` for the first slice: the
+best balance on a CPU-only machine.
 
 ## Speed, honestly
 
-On a 4-core i5-8350U: the first words appear after about five seconds — a 2
-second first slice, then ~3 seconds to decode it (word timestamps included).
-After that a fresh slice lands every ~3 seconds, decoded while you keep
-talking. When you stop, the last words land about three seconds later.
+On a 4-core i5-8350U: the first words appear in under five seconds — a 2
+second first slice, decoded by the small `base` first-slice model while the
+main model finishes loading. After that a fresh slice lands every ~3 seconds,
+decoded by the main `small` model while you keep talking. When you stop, the
+last words land about three seconds later.
 
 Each slice commits only the words that end before the next slice's overlap;
 the next slice re-reads the boundary with the right context. That is why a
@@ -152,8 +156,11 @@ misheard word at an edge cannot be typed twice or leak into the rest of the
 take. If the machine is busy and a slice runs long, Sotto transcribes one
 larger slice to catch up instead of letting the lag grow for the whole take.
 
-The model stays loaded for 30 idle minutes. The first sentence after that pays
-a few seconds of model load; everything after is back to the times above.
+The models stay loaded for 30 idle minutes. The first sentence after that
+starts on the fast model while the main model warms up, so it no longer pays
+the full cold-start penalty. Set `SOTTO_FAST_MODEL=none` to use only the main
+model, or `SOTTO_FAST_MODEL=tiny` to trade some first-slice accuracy for an
+even smaller download.
 
 Short takes and the fallback path still transcribe the whole file at once: a
 10 second sentence takes ~15 seconds there. Streaming is what hides that.
@@ -193,7 +200,7 @@ Settings → Keyboard → Shortcuts.
 | `dictate` | the toggle the hotkey runs: start → stop → transcribe → type |
 | `indicator.py` | the little listening strip (Wayland layer-shell, real mic level) |
 | `streamer.py` | live slicing: first slice at 2 s, then every ~3 s, commits only confirmed words |
-| `model_server.py` | keeps the transcriber and a tiny language detector resident; exits after 30 min idle |
+| `model_server.py` | keeps the main model, the fast first-slice model, and the tiny language detector resident; exits after 30 min idle |
 | `transcribe.py` | one-shot path, also the fallback when streaming fails |
 | `vdlib.py` | shared helpers: server socket, text insertion, history |
 | `setup` | the installer above |
