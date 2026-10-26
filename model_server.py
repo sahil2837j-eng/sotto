@@ -64,9 +64,9 @@ def load_fast_model():
     else:
         detector = None
 
-    # A 2 s first slice with the main model is what used to take nine seconds
-    # on a cold start. Base is quick to load, materially better than tiny on a
-    # short slice, and small enough to keep the first words inside the budget.
+    # Waiting for the main model on a cold start used to take nine seconds.
+    # Base is quick to load, materially better than tiny on a short slice, and
+    # small enough to keep the 2.5 s first slice inside the five-second budget.
     fast_name = os.environ.get("SOTTO_FAST_MODEL", "base").strip()
     if fast_name and fast_name.lower() not in ("none", "off"):
         if detector is not None and fast_name == det_name:

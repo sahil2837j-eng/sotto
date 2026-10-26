@@ -43,7 +43,7 @@ STREAM_STATE = os.path.join(STATE, "stream.json")
 LAST_TAKE = os.path.join(STATE, "last_take.txt")
 
 CHUNK = float(os.environ.get("VD_CHUNK", "3.0"))  # seconds of new audio per emission
-FIRST_CHUNK = float(os.environ.get("VD_FIRST_CHUNK", "2.0"))  # first words out sooner
+FIRST_CHUNK = float(os.environ.get("VD_FIRST_CHUNK", "2.5"))  # enough context for the first sentence
 OVERLAP = 1.2  # seconds re-covered before the boundary, used to dedupe words
 WORD_MARGIN = 0.4  # type words ending this far before the next slice starts
 WORD_EPS = 0.10  # timestamp slop: a word starting this close to typed_until is a repeat

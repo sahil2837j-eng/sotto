@@ -144,9 +144,10 @@ best balance on a CPU-only machine.
 
 ## Speed, honestly
 
-On a 4-core i5-8350U: the first words appear in under five seconds — a 2
-second first slice, decoded by the small `base` first-slice model while the
-main model finishes loading. After that a fresh slice lands every ~3 seconds,
+On a 4-core i5-8350U: the first words appear in under five seconds — a 2.5
+second first slice, long enough to hear the first sentence, decoded by the
+small `base` first-slice model while the main model finishes loading. After
+that a fresh slice lands every ~3 seconds,
 decoded by the main `small` model while you keep talking. When you stop, the
 last words land about three seconds later.
 
@@ -199,7 +200,7 @@ Settings → Keyboard → Shortcuts.
 |---|---|
 | `dictate` | the toggle the hotkey runs: start → stop → transcribe → type |
 | `indicator.py` | the little listening strip (Wayland layer-shell, real mic level) |
-| `streamer.py` | live slicing: first slice at 2 s, then every ~3 s, commits only confirmed words |
+| `streamer.py` | live slicing: first slice at 2.5 s, then every ~3 s, commits only confirmed words |
 | `model_server.py` | keeps the main model, the fast first-slice model, and the tiny language detector resident; exits after 30 min idle |
 | `transcribe.py` | one-shot path, also the fallback when streaming fails |
 | `vdlib.py` | shared helpers: server socket, text insertion, history |
